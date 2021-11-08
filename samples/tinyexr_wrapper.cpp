@@ -28,6 +28,12 @@
 #define TINYEXR_IMPLEMENTATION
 #include <tinyexr/tinyexr.h>
 
+#define STBI_MSC_SECURE_CRT
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image.h"
+#include "stb_image_write.h"
+
 
 void save_exr(const float* data, int width, int height, int nChannels, int channelStride, const char* outfilename) {
 	EXRHeader header;
@@ -108,4 +114,24 @@ void load_exr(float** data, int* width, int* height, const char* filename) {
 			throw std::runtime_error("Failed to load EXR image");
 		}
 	}
+}
+
+
+void save_jpg(const float* data, int width, int height, const char* outfilename) {
+    const auto *fb = data;
+    uint8_t *pixels = new uint8_t[width * height * 3];
+    size_t index = 0;
+    for (int j = 0; j < height; ++j) {
+      for (int i = 0; i < width; ++i) {
+		size_t idx = i + j * width;
+        int ir = int(255.99 * data[3 * idx + 0]);
+        int ig = int(255.99 * data[3 * idx + 1]);
+        int ib = int(255.99 * data[3 * idx + 2]);
+        pixels[index++] = ir;
+        pixels[index++] = ig;
+        pixels[index++] = ib;
+      }
+    }
+    stbi_write_jpg(outfilename, width, height, 3, pixels, 100);
+    delete[] pixels;
 }

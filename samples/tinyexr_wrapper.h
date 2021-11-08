@@ -27,3 +27,5 @@
 
 void save_exr(const float* data, int width, int height, int nChannels, int channelStride, const char* outfilename);
 void load_exr(float** data, int* width, int* height, const char* filename);
+
+void save_jpg(const float* data, int width, int height, const char* outfilename);
