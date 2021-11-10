@@ -1,4 +1,8 @@
-# Tiny CUDA Neural Networks
+# Neural Data Caching for Real-Time Volume Rendering
+
+Forked from [https://github.com/NVlabs/tiny-cuda-nn](https://github.com/NVlabs/tiny-cuda-nn)
+
+## Tiny CUDA Neural Networks
 
 This is a small, self-contained framework for training and querying neural networks. Most notably, it contains a lightning fast "fully fused" multi-layer perceptron as well as support for various advanced input encodings, losses, and optimizers.
 

@@ -73,8 +73,8 @@ void save_image(const T *image, int width, int height, int n_channels, int chann
 		float_host_data[i] = (float)host_data[i];
 	}
 
-	save_exr(float_host_data.data(), width, height, n_channels, channel_stride, (filename + ".exr").c_str());
-	// save_jpg(float_host_data.data(), width, height, (filename + ".jpg").c_str());
+	// save_exr(float_host_data.data(), width, height, n_channels, channel_stride, (filename + ".exr").c_str());
+	save_jpg(float_host_data.data(), width, height, (filename + ".jpg").c_str());
 }
 
 template <uint32_t stride>
@@ -99,15 +99,15 @@ __global__ void eval_image(uint32_t n_elements, cudaTextureObject_t texture, flo
 }
 
 template <uint32_t max_resolution>
-__global__ void convert_to_grid(uint32_t n_elements, int image_width, int image_height, float* __restrict__ sample_resolutions, float* __restrict__ samples)
+__global__ void convert_to_grid(uint32_t n_elements, int image_width, int image_height, float *__restrict__ sample_resolutions, float *__restrict__ samples)
 {
 	uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n_elements)
 		return;
 
-  const int resolution = (1.f - sample_resolutions[i]) * max_resolution;
-  // const int resolution = 4;
-  const int r = 1 << resolution;
+	const int resolution = (1.f - sample_resolutions[i]) * max_resolution;
+	// const int resolution = 4;
+	const int r = 1 << resolution;
 
 	const int width = image_width / r;
 	const int height = image_height / r;
@@ -116,7 +116,6 @@ __global__ void convert_to_grid(uint32_t n_elements, int image_width, int image_
 
 	const int x = (1.f - samples[idx + 0]) * (float)width;
 	const int y = (1.f - samples[idx + 1]) * (float)height;
-
 	samples[idx + 0] = (x + 0.5) / (float)width;
 	samples[idx + 1] = (y + 0.5) / (float)height;
 }
