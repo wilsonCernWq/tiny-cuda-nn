@@ -30,14 +30,18 @@ add_subdirectory(imgui-1.79)
 
 add_subdirectory(util)
 
-add_executable(d11_render_to_texture main.cpp)
-target_include_directories(d11_render_to_texture PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(d11_render_to_texture PUBLIC util-core-3.3)
-set_target_properties(d11_render_to_texture PROPERTIES CXX_STANDARD 11)
-target_add_embeded_shaders(d11_render_to_texture 
+set(thisapp d11_render_to_texture)
+
+add_executable(${thisapp} main.cpp ../tinyexr_wrapper.cpp neural_cache.cu)
+set_target_properties(${thisapp} PROPERTIES CXX_STANDARD 17)
+target_include_directories(${thisapp} PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(${thisapp} PUBLIC 
+  util-core-3.3
+  ${CUDA_LIBRARIES} 
+  curand tiny-cuda-nn)
+target_compile_options(${thisapp} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_NVCC_FLAGS}>)
+target_add_embeded_shaders(${thisapp} 
   OUTPUT_NAME ${CMAKE_CURRENT_BINARY_DIR}/shaders.h 
   SHADERS
-  vshader_rtt=shader_rtt_vertex.glsl
-  fshader_rtt=shader_rtt_fragment.glsl
   vshader_quad=shader_passthrough.glsl
   fshader_quad=shader_wobbly_texture.glsl)

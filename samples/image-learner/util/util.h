@@ -55,17 +55,17 @@ _glCheckError(const char* file, int line, const char* comment);
 #define check_error_gl(x) ((void)0)
 #endif
 
-void
-read_frame(GLFWwindow* window, std::vector<uint8_t>& buffer /* TODO use raw array*/, int w, int h);
+// void
+// read_frame(GLFWwindow* window, std::vector<uint8_t>& buffer /* TODO use raw array*/, int w, int h);
 
-void
-screen_shot(GLFWwindow* window, const std::string& fname);
+// void
+// screen_shot(GLFWwindow* window, const std::string& fname);
 
-float
-get_framerate();
+// float
+// get_framerate();
 
-void
-save_jpg(const std::string& fname, std::vector<uint8_t>& fb, int w, int h);
+// void
+// save_jpg(const std::string& fname, std::vector<uint8_t>& fb, int w, int h);
 
 /* TODO support other formats */
 // void
