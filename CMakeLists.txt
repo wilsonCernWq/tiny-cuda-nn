@@ -25,7 +25,7 @@ cmake_minimum_required(VERSION 3.17)
 PROJECT(tiny-cuda-nn
 	VERSION 1.1
 	DESCRIPTION "A tiny, fast neural network with a fixed structure in CUDA"
-	LANGUAGES CXX CUDA
+	LANGUAGES C CXX CUDA
 )
 
 # set(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda)

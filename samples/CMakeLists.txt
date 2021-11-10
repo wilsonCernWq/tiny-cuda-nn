@@ -20,6 +20,11 @@
 # STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+add_subdirectory(glm-0.9.9.8)
+
+add_executable(bin2c bin2c/bin2c.c)
+include(bin2c/target_add_embeded_shaders.cmake)
+
 ###############################################################################
 # Samples
 ###############################################################################
