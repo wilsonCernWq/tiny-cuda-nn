@@ -31,6 +31,7 @@ using namespace glm;
 ArcballCamera camera(vec3(4, 3, -3), vec3(0, 0, 0), vec3(0, 1, 0));
 
 #include "neural_cache.hpp"
+float loss = 0.f;
 
 static void
 error(int error, const char* description)
@@ -126,6 +127,7 @@ gui(bool* p_open)
   if (ImGui::Begin("Information", NULL, flags)) 
   {
     ImGui::Text("FPS (Hz): %.f\n", fps);
+    ImGui::Text("Loss: %.7f\n", loss);
     ImGui::End();
   }
 
@@ -238,9 +240,9 @@ main(const int argc, const char** argv)
       glUseProgram(program_quad);
 
       glActiveTexture(GL_TEXTURE0); // Bind our texture in Texture Unit 0
-      glUniform1i(rendered_texture_id, 0); // Set our "renderedTexture" sampler to use Texture Unit 0
+      glUniform1i(rendered_texture_id, 0); // Set our sampler to use Texture Unit 0
       {
-        // TODO !!! bind CUDA texture here
+        // TODO ==> bind CUDA texture here
         cache.bindTexture();
       }
 
@@ -260,6 +262,14 @@ main(const int argc, const char** argv)
       glDrawArrays(GL_TRIANGLES, 0, 6); // 2*3 indices starting at 0 -> 2 triangles
       glDisableVertexAttribArray(0);
     }
+
+    static int frames = 0;
+    ++frames;
+
+    cache.train(10);
+    cache.render();
+    if (frames % 10 == 0 || frames == 1) // dont update this too frequently
+      loss = cache.pull_loss();
 
     // Draw GUI
     {

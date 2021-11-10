@@ -270,7 +270,6 @@ int main(int argc, char *argv[])
 		cudaStream_t inference_stream;
 		CUDA_CHECK_THROW(cudaStreamCreate(&inference_stream));
 		cudaStream_t training_stream = inference_stream;
-
 		CURAND_CHECK_THROW(curandSetStream(rng, training_stream));
 
 		// Auxiliary matrices for training
