@@ -15,14 +15,15 @@ public:
     void bindInferenceTexture();    
     void bindReferenceTexture();
 
-    // trigger an actual data access, domain: [0, 1]
-    // void focus(float x, float y);
+    // trigger an evaluation step
+    void renderInference();
+    void renderReference();
 
     // trigger a training step
     void train(size_t steps);
 
-    // trigger an evaluation step
-    void render();
+    // trigger an actual data access, domain: [0, 1]
+    void access(float x, float y);
 
     // get current loss
     float currentLoss();

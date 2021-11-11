@@ -274,10 +274,10 @@ main(const int argc, const char** argv)
     static int frames = 0;
     ++frames;
 
-    cache.train(10);
-    cache.render();
-    if (frames % 10 == 0 || frames == 1) // dont update this too frequently
-      loss = cache.currentLoss();
+    // cache.train(10);
+    // cache.renderInference();
+    // if (frames % 10 == 0 || frames == 1) // dont update this too frequently
+    //   loss = cache.currentLoss();
 
     // Draw GUI
     {
