@@ -1,17 +1,19 @@
 #ifndef NEURAL_CACHE_HPP
 #define NEURAL_CACHE_HPP
 
-// #include <tuple>
+#include <tuple>
+#include <memory>
 
 class NeuralImageCache
 {
+    struct Impl;
 public:
     ~NeuralImageCache();
 
     NeuralImageCache(std::string filename);
 
-    // bind to the current OpenGL texture
-    void bindTexture();    
+    void bindInferenceTexture();    
+    void bindReferenceTexture();
 
     // trigger an actual data access, domain: [0, 1]
     // void focus(float x, float y);
@@ -23,13 +25,10 @@ public:
     void render();
 
     // get current loss
-    float pull_loss();
+    float currentLoss();
 
 private:
-    int width;
-    int height;
-    void initialize();
-    void synchronize(void* device_ptr);
+    std::unique_ptr<Impl> pimpl;  // pointer to the internal implementation
 };
 
 #endif // NEURAL_CACHE_HPP

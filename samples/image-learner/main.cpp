@@ -152,7 +152,7 @@ init()
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
   // Open a window and create its OpenGL context
-  window = glfwCreateWindow(600, 600, "ECS 175 (press 'g' to display GUI)", NULL, NULL);
+  window = glfwCreateWindow(1200, 600, "ECS 175 (press 'g' to display GUI)", NULL, NULL);
   if (window == NULL) 
   {
     glfwTerminate();
@@ -227,26 +227,19 @@ main(const int argc, const char** argv)
   // ---------------------------------------------
   // Rendering loop
   // ---------------------------------------------
-
-  do {
-
-    // Render to the screen
-    glViewport(0, 0, framebuffer_size.x, framebuffer_size.y);
-    {
-      glClear(GL_COLOR_BUFFER_BIT);
-      glDisable(GL_DEPTH_TEST);
-
+  auto draw = [&](bool draw_inference) 
+  {
       // Use our shader
       glUseProgram(program_quad);
-
       glActiveTexture(GL_TEXTURE0); // Bind our texture in Texture Unit 0
-      glUniform1i(rendered_texture_id, 0); // Set our sampler to use Texture Unit 0
-      {
-        // TODO ==> bind CUDA texture here
-        cache.bindTexture();
-      }
-
       glUniform1f(time_id, (float)(glfwGetTime() * 10.0f));
+      glUniform1i(rendered_texture_id, 0); // Set our sampler to use Texture Unit 0
+      if (draw_inference) {
+        cache.bindInferenceTexture();
+      }
+      else {
+        cache.bindReferenceTexture();
+      }
 
       // 1st attribute buffer : vertices
       glEnableVertexAttribArray(0);
@@ -258,9 +251,24 @@ main(const int argc, const char** argv)
                             0, // stride
                             (void*)0 // array buffer offset
       );
+
       // Draw the triangles !
       glDrawArrays(GL_TRIANGLES, 0, 6); // 2*3 indices starting at 0 -> 2 triangles
       glDisableVertexAttribArray(0);
+  };
+
+  do {
+
+    // Render to the screen
+    glClear(GL_COLOR_BUFFER_BIT);
+    glDisable(GL_DEPTH_TEST);
+    glViewport(0, 0, framebuffer_size.x/2, framebuffer_size.y);
+    {
+        draw(false);
+    }
+    glViewport(framebuffer_size.x/2, 0, framebuffer_size.x/2, framebuffer_size.y);
+    {
+        draw(true);
     }
 
     static int frames = 0;
@@ -269,7 +277,7 @@ main(const int argc, const char** argv)
     cache.train(10);
     cache.render();
     if (frames % 10 == 0 || frames == 1) // dont update this too frequently
-      loss = cache.pull_loss();
+      loss = cache.currentLoss();
 
     // Draw GUI
     {

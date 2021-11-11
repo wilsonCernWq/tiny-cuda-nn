@@ -105,8 +105,8 @@ __global__ void convert_to_grid(uint32_t n_elements, int image_width, int image_
 	if (i >= n_elements)
 		return;
 
-	const int resolution = (1.f - sample_resolutions[i]) * max_resolution;
-	// const int resolution = 4;
+	// const int resolution = (1.f - sample_resolutions[i]) * max_resolution;
+	const int resolution = 4;
 	const int r = 1 << resolution;
 
 	const int width = image_width / r;
@@ -248,6 +248,9 @@ int main(int argc, char *argv[])
 		}
 
 		xs_and_ys.copy_from_host(host_xs_and_ys.data());
+
+		// TODO try linear interpolation
+		// linear_kernel(convert_to_grid<4>, 0, nullptr, n_coords, sampling_width, sampling_height, xs_and_ys.data(), xs_and_ys.data());
 
 		linear_kernel(eval_image<3>, 0, nullptr, n_coords, texture, xs_and_ys.data(), sampled_image.data());
 
