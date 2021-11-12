@@ -25,22 +25,25 @@ list(APPEND GFX_LIBRARIES glfw)
 
 set(ALL_GL_VERSIONS core-3.3)
 add_subdirectory(glad-core-3.3)
-
 add_subdirectory(imgui-1.79)
-
 add_subdirectory(util)
 
-set(thisapp d11_render_to_texture)
 
-add_executable(${thisapp} main.cpp ../tinyexr_wrapper.cpp neural_cache.cu)
-set_target_properties(${thisapp} PROPERTIES CXX_STANDARD 17)
-target_include_directories(${thisapp} PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(${thisapp} PUBLIC 
-  util-core-3.3
+add_library(neural-cache neural_cache.cu ../tinyexr_wrapper.cpp)
+target_link_libraries(neural-cache PUBLIC 
   ${CUDA_LIBRARIES} 
   curand 
   tiny-cuda-nn 
-  tiny-cuda-helper)
+  tiny-cuda-helper
+  util-core-3.3)
+target_compile_options(neural-cache PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_NVCC_FLAGS}>)
+
+
+set(thisapp neural_image_learner)
+add_executable(${thisapp} main.cpp)
+set_target_properties(${thisapp} PROPERTIES CXX_STANDARD 17)
+target_include_directories(${thisapp} PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(${thisapp} PUBLIC util-core-3.3 neural-cache)
 target_compile_options(${thisapp} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_NVCC_FLAGS}>)
 target_add_embeded_shaders(${thisapp} 
   OUTPUT_NAME ${CMAKE_CURRENT_BINARY_DIR}/shaders.h 
