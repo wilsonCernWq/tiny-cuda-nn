@@ -25,6 +25,13 @@ add_subdirectory(glm-0.9.9.8)
 add_executable(bin2c bin2c/bin2c.c)
 include(bin2c/target_add_embeded_shaders.cmake)
 
+add_library(tiny-cuda-helper 
+    helper_cuda_texture.cu 
+    helper_cuda_texture.h
+    helper_math.h)
+target_link_libraries(tiny-cuda-helper PUBLIC ${CUDA_LIBRARIES} curand tiny-cuda-nn)
+target_compile_options(tiny-cuda-helper PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_NVCC_FLAGS}>)
+
 ###############################################################################
 # Samples
 ###############################################################################

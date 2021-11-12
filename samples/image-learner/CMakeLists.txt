@@ -38,7 +38,9 @@ target_include_directories(${thisapp} PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(${thisapp} PUBLIC 
   util-core-3.3
   ${CUDA_LIBRARIES} 
-  curand tiny-cuda-nn)
+  curand 
+  tiny-cuda-nn 
+  tiny-cuda-helper)
 target_compile_options(${thisapp} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_NVCC_FLAGS}>)
 target_add_embeded_shaders(${thisapp} 
   OUTPUT_NAME ${CMAKE_CURRENT_BINARY_DIR}/shaders.h 

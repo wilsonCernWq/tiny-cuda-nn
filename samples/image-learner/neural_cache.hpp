@@ -15,6 +15,8 @@ public:
     void bindInferenceTexture();    
     void bindReferenceTexture();
 
+    void setLod(int lod);
+
     // trigger an evaluation step
     void renderInference();
     void renderReference();

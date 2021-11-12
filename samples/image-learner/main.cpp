@@ -32,6 +32,7 @@ ArcballCamera camera(vec3(4, 3, -3), vec3(0, 0, 0), vec3(0, 1, 0));
 
 #include "neural_cache.hpp"
 float loss = 0.f;
+int lod = 0;
 
 static void
 error(int error, const char* description)
@@ -128,6 +129,7 @@ gui(bool* p_open)
   {
     ImGui::Text("FPS (Hz): %.f\n", fps);
     ImGui::Text("Loss: %.7f\n", loss);
+    ImGui::SliderInt("Level Of Detail", &lod, 0, 10);
     ImGui::End();
   }
 
@@ -274,10 +276,12 @@ main(const int argc, const char** argv)
     static int frames = 0;
     ++frames;
 
-    // cache.train(10);
-    // cache.renderInference();
-    // if (frames % 10 == 0 || frames == 1) // dont update this too frequently
-    //   loss = cache.currentLoss();
+    cache.setLod(lod);
+    cache.train(10);
+    cache.renderInference();
+    cache.renderReference();
+    if (frames % 10 == 0 || frames == 1) // dont update this too frequently
+      loss = cache.currentLoss();
 
     // Draw GUI
     {
