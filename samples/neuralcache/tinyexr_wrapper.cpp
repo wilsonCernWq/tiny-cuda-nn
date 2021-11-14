@@ -131,3 +131,35 @@ void load_exr(float **data, int *width, int *height, const char *filename)
 		}
 	}
 }
+
+void save_jpg(const float *data, int width, int height, const char *outfilename)
+{
+	float exposure = 1.5f;
+	float gamma = 2.2f;
+	auto corrected = [exposure, gamma](const float &c) -> float
+	{
+		float tone_mapped = 1.0 - std::exp(-c * exposure);
+		return std::pow(tone_mapped, 1.0 / gamma);
+	};
+
+	uint8_t *pixels = new uint8_t[width * height * 3];
+	size_t index = 0;
+	for (int j = 0; j < height; ++j)
+	{
+		for (int i = 0; i < width; ++i)
+		{
+			size_t idx = i + j * width;
+
+			int ir = int(255.99 * corrected(data[3 * idx + 0]));
+			int ig = int(255.99 * corrected(data[3 * idx + 1]));
+			int ib = int(255.99 * corrected(data[3 * idx + 2]));
+
+			pixels[index++] = std::clamp(ir, 0, 255);
+			pixels[index++] = std::clamp(ig, 0, 255);
+			pixels[index++] = std::clamp(ib, 0, 255);
+		}
+	}
+
+	stbi_write_jpg(outfilename, width, height, 3, pixels, 100);
+	delete[] pixels;
+}

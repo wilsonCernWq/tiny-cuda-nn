@@ -30,7 +30,7 @@ using namespace glm;
 #include "util_camera.h"
 ArcballCamera camera(vec3(4, 3, -3), vec3(0, 0, 0), vec3(0, 1, 0));
 
-#include "neural_cache.hpp"
+#include "neuralcache.hpp"
 float loss = 0.f;
 int lod = 0;
 
@@ -202,6 +202,8 @@ main(const int argc, const char** argv)
   init();
 
   NeuralImageCache cache("../data/images/albert.exr");
+  // NeuralImageCache cache("../data/images/W8B0747.exr");
+  // NeuralImageCache cache("../data/images/W8B0747_4k.exr");
 
   ivec2 window_size, framebuffer_size;
   glfwGetWindowSize(window, &window_size.x, &window_size.y);

@@ -1,4 +1,4 @@
-#include "neural_cache.hpp"
+#include "neuralcache.hpp"
 
 #include "util.h"
 
@@ -57,6 +57,8 @@ static std::tuple<GPUMemory<float>, cudaTextureObject_t> generate_image_texture(
 
 __global__ void quantize_sampling_inputs_fixed_lod(uint32_t n_elements, uint32_t width, uint32_t height, int lod, float *__restrict__ inputs)
 {
+    if (lod == 0) return;
+
 	uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n_elements) return;
 

@@ -20,18 +20,6 @@
 # STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-add_subdirectory(glm-0.9.9.8)
-
-add_executable(bin2c bin2c/bin2c.c)
-include(bin2c/target_add_embeded_shaders.cmake)
-
-add_library(tiny-cuda-helper 
-    helper_cuda_texture.cu 
-    helper_cuda_texture.h
-    helper_math.h)
-target_link_libraries(tiny-cuda-helper PUBLIC ${CUDA_LIBRARIES} curand tiny-cuda-nn)
-target_compile_options(tiny-cuda-helper PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_NVCC_FLAGS}>)
-
 ###############################################################################
 # Samples
 ###############################################################################
@@ -40,4 +28,4 @@ add_executable(mlp_learning_an_image mlp_learning_an_image.cu tinyexr_wrapper.cp
 target_link_libraries(mlp_learning_an_image PUBLIC ${CUDA_LIBRARIES} curand tiny-cuda-nn)
 target_compile_options(mlp_learning_an_image PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_NVCC_FLAGS}>)
 
-add_subdirectory(image-learner)
+add_subdirectory(neuralcache)
