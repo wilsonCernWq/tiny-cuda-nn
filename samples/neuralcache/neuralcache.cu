@@ -2,8 +2,8 @@
 
 #include "util.h"
 
-#include "../tinyexr_wrapper.h"
-#include "../helper_cuda_texture.h"
+#include "tinyexr_wrapper.h"
+#include "helper_cuda_texture.h"
 
 #include <tiny-cuda-nn/misc_kernels.h>
 #include <tiny-cuda-nn/config.h>
