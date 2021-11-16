@@ -26,8 +26,6 @@
 using namespace tcnn;
 using precision_t = network_precision_t;
 
-//  Work with OpenEXR images
-
 static GPUMemory<float> load_image(const std::string &filename, int &width, int &height)
 {
 	float *out; // width * height * RGBA
@@ -56,7 +54,7 @@ static std::tuple<GPUMemory<float>, cudaTextureObject_t> generate_image_texture(
 __device__ inline void quantize_sampling_inputs_inner(uint32_t i, uint32_t width, uint32_t height, int lod, float *__restrict__ inputs)
 {
 	const uint32_t r = 1 << lod;
-	const uint32_t w = width / r;
+	const uint32_t w = width  / r;
 	const uint32_t h = height / r;
 
 	const uint32_t idx = i * 2;
@@ -88,16 +86,29 @@ __global__ void quantize_sampling_inputs_variable_lod(uint32_t n_elements, uint3
     quantize_sampling_inputs_inner(i, width, height, lod, inputs);
 }
 
-template <uint32_t stride>
-__global__ void sample_groundtruth(uint32_t n_elements, cudaTextureObject_t groundtruth, float *__restrict__ xs_and_ys, float *__restrict__ result)
+__global__ void select_sampling_tile(uint32_t n_elements, float scale_x, float scale_y, float offset_x, float offset_y, float *__restrict__ inputs)
 {
-	uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= n_elements) return;
+
+    const uint32_t idx = i * 2;
+
+	const float x = inputs[idx + 0] * scale_x + offset_x;
+	const float y = inputs[idx + 1] * scale_y + offset_y;
+	inputs[idx + 0] = MIN(x, 1.f);
+	inputs[idx + 1] = MIN(y, 1.f);
+}
+
+template <uint32_t stride>
+__global__ void sample_groundtruth(uint32_t n_elements, uint32_t n_offset, cudaTextureObject_t groundtruth, int lod, float *__restrict__ xs_and_ys, float *__restrict__ result)
+{
+	uint32_t i = blockIdx.x * blockDim.x + threadIdx.x + n_offset;
 	if (i >= n_elements) return;
 
 	uint32_t output_idx = i * stride;
 	uint32_t input_idx  = i * 2;
 
-	float4 sample = tex2D<float4>(groundtruth, xs_and_ys[input_idx], xs_and_ys[input_idx + 1]);
+    float4 sample = tex2DLod<float4>(groundtruth, xs_and_ys[input_idx], xs_and_ys[input_idx + 1], (float)lod);
 
 	result[output_idx + 0] = sample.x;
 	result[output_idx + 1] = sample.y;
@@ -115,7 +126,7 @@ __global__ void resample_texture_with_lod(uint32_t width, uint32_t height, cudaT
     surf2Dwrite(color, output, x * sizeof(float4), y);
 }
 
-const uint32_t batch_size = 1 << 12;
+const uint32_t batch_size    = 1 << 16;
 const uint32_t n_input_dims  = 2; // 2-D image coordinate
 const uint32_t n_output_dims = 4; // RGBA color
 
@@ -126,6 +137,12 @@ struct NeuralImageCache::Impl
     
     int width;
     int height;
+
+    int tile_size = 128;
+    int tile_dim_x;
+    int tile_dim_y;
+    float scale_x;
+    float scale_y;
 
     GPUMemory<float> xs_and_ys;
 
@@ -154,6 +171,10 @@ struct NeuralImageCache::Impl
     uint64_t total_steps = 0;
 
     int level_of_detail = 0;
+
+    bool control_quantize_sample = false;
+    bool control_pause_training = false;
+    bool control_iterating_tile = false;
 
     Impl(std::string filename) 
     {
@@ -186,6 +207,7 @@ struct NeuralImageCache::Impl
             }
         };
         std::tie(groundtruth_data, groundtruth) = generate_image_texture(filename, width, height);
+        updateTileDimensions();
 
         uint32_t n_coords = width * height;
         uint32_t n_coords_padded = (n_coords + 255) / 256 * 256;
@@ -244,17 +266,42 @@ struct NeuralImageCache::Impl
         inference_opengl_texture.reset();
     }
 
+    void updateTileDimensions()
+    {
+        tile_dim_x = (width  + tile_size - 1) / tile_size;
+        tile_dim_y = (height + tile_size - 1) / tile_size;
+        scale_x = tile_size / (float)width;
+        scale_y = tile_size / (float)height;
+    }
+
     void train(size_t steps)
     {
+        if (control_pause_training) return;
+
         /* now randomly sample some data */
         for (int i = 0; i < steps; ++i)
         {
             // Third step: sample a reference image to dump to disk. Visual comparison of this reference image and the learned
             //             function will be eventually possible.
+
+            CURAND_CHECK_THROW(curandGenerateUniform(rng, training_input->data(), batch_size * n_input_dims));
+
+            if (control_iterating_tile) 
             {
-                CURAND_CHECK_THROW(curandGenerateUniform(rng, training_input->data(), batch_size * n_input_dims));
+                uint32_t tile_index = total_steps % ((size_t)tile_dim_x * tile_dim_y);
+                float offset_x = (tile_index % tile_dim_x) * scale_x;
+                float offset_y = (tile_index / tile_dim_y) * scale_y;
+                linear_kernel(select_sampling_tile, 0, training_stream, batch_size, scale_x, scale_y, offset_x, offset_y, training_input->data());    
+            }
+
+            if (control_quantize_sample)
+            {
                 linear_kernel(quantize_sampling_inputs_fixed_lod, 0, training_stream, batch_size, width, height, level_of_detail, training_input->data());
-                linear_kernel(sample_groundtruth<n_output_dims>, 0, training_stream, batch_size, groundtruth, training_input->data(), training_target->data());
+                linear_kernel(sample_groundtruth<n_output_dims>, 0, training_stream, batch_size, 0, groundtruth, 0, training_input->data(), training_target->data());
+            }
+            else
+            {
+                linear_kernel(sample_groundtruth<n_output_dims>, 0, training_stream, batch_size, 0, groundtruth, level_of_detail, training_input->data(), training_target->data());
             }
 
             float loss_value;
@@ -263,15 +310,14 @@ struct NeuralImageCache::Impl
             }
             tmp_loss += loss_value;
             ++tmp_loss_counter;
+            
+            total_steps += 1;
         }
-        total_steps += steps;
     }
     
     void renderInference()
     {
         network->inference(inference_stream, *inference_input, *inference_result);
-
-        // linear_kernel(sample_groundtruth<n_output_dims>, 0, inference_stream, width * height, groundtruth, inference_input->data(), inference_result->data());
 
         // We want to copy cuda_dest_resource data to the texture
         // map buffer objects to get CUDA device pointers
@@ -290,9 +336,7 @@ struct NeuralImageCache::Impl
         cudaArray_t array;
         reference_opengl_texture->mapCudaArray(array);
         /* show ground truth at the full resolution */
-        // {
-        //     CUDA_CHECK_THROW(cudaMemcpyToArray(array, 0, 0, groundtruth_data.data(), sizeof(float) * width * height * 4, cudaMemcpyDeviceToDevice));
-        // }
+        // CUDA_CHECK_THROW(cudaMemcpyToArray(array, 0, 0, groundtruth_data.data(), sizeof(float) * width * height * 4, cudaMemcpyDeviceToDevice));
         /* show ground truth with lod */
         {
             cudaResourceDesc resDesc;
@@ -366,4 +410,24 @@ void NeuralImageCache::renderReference()
 float NeuralImageCache::currentLoss()
 {
     return pimpl->currentLoss();
+}
+
+void NeuralImageCache::controlQuantizeSample(bool f)
+{
+    pimpl->control_quantize_sample = f;
+}
+
+void NeuralImageCache::controlPauseTraining(bool f)
+{
+    pimpl->control_pause_training = f;
+}
+
+void NeuralImageCache::controlIteratingTile(bool f, int s)
+{
+    pimpl->control_iterating_tile = f;
+    if (pimpl->control_iterating_tile)
+    {
+        pimpl->tile_size = s;
+        pimpl->updateTileDimensions();
+    }
 }

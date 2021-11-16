@@ -32,7 +32,11 @@ ArcballCamera camera(vec3(4, 3, -3), vec3(0, 0, 0), vec3(0, 1, 0));
 
 #include "neuralcache.hpp"
 float loss = 0.f;
-int lod = 0;
+int leve_of_detail = 0;
+int tile_size_rank = 0;
+bool control_quantize_sample = false;
+bool control_pause_training = false;
+bool control_iterating_tile = false;
 
 static void
 error(int error, const char* description)
@@ -129,7 +133,13 @@ gui(bool* p_open)
   {
     ImGui::Text("FPS (Hz): %.f\n", fps);
     ImGui::Text("Loss: %.7f\n", loss);
-    ImGui::SliderInt("Level Of Detail", &lod, 0, 10);
+    ImGui::SliderInt("Level Of Detail", &leve_of_detail, 0, 10);
+    ImGui::Checkbox("Control Quantize Sample", &control_quantize_sample);
+    ImGui::Checkbox("Control Pause Training", &control_pause_training);
+    ImGui::Checkbox("control_iterating_tile", &control_iterating_tile);
+    if (control_iterating_tile) {
+      ImGui::SliderInt("Tile Size Rank", &tile_size_rank, 0, 10);
+    }
     ImGui::End();
   }
 
@@ -278,8 +288,12 @@ main(const int argc, const char** argv)
     static int frames = 0;
     ++frames;
 
-    cache.setLod(lod);
-    cache.train(10);
+    cache.controlQuantizeSample(control_quantize_sample);
+    cache.controlPauseTraining(control_pause_training);
+    cache.controlIteratingTile(control_iterating_tile, 1 << tile_size_rank);
+
+    cache.setLod(leve_of_detail);
+    cache.train(1);
     cache.renderInference();
     cache.renderReference();
     if (frames % 10 == 0 || frames == 1) // dont update this too frequently

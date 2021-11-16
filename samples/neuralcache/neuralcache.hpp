@@ -1,6 +1,7 @@
 #ifndef NEURAL_CACHE_HPP
 #define NEURAL_CACHE_HPP
 
+
 #include <tuple>
 #include <memory>
 
@@ -27,6 +28,10 @@ public:
 
     // get current loss
     float currentLoss();
+
+    void controlQuantizeSample(bool);
+    void controlPauseTraining(bool);
+    void controlIteratingTile(bool, int);
 
 private:
     struct Impl;
