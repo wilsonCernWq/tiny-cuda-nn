@@ -1,15 +1,13 @@
 #include "neuralcache.hpp"
 
-#include "util.h"
-
 #include "tinyexr_wrapper.h"
 #include "helper_cuda_texture.h"
+#include "texture_interop.h"
 
 #include <tiny-cuda-nn/misc_kernels.h>
 #include <tiny-cuda-nn/config.h>
 
 #include <cuda_runtime.h>
-#include <cuda_gl_interop.h>
 
 #include <chrono>
 #include <cstdlib>
@@ -55,13 +53,8 @@ static std::tuple<GPUMemory<float>, cudaTextureObject_t> generate_image_texture(
     return std::make_tuple(std::move(image), texture);
 }
 
-__global__ void quantize_sampling_inputs_fixed_lod(uint32_t n_elements, uint32_t width, uint32_t height, int lod, float *__restrict__ inputs)
+__device__ inline void quantize_sampling_inputs_inner(uint32_t i, uint32_t width, uint32_t height, int lod, float *__restrict__ inputs)
 {
-    if (lod == 0) return;
-
-	uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i >= n_elements) return;
-
 	const uint32_t r = 1 << lod;
 	const uint32_t w = width / r;
 	const uint32_t h = height / r;
@@ -74,23 +67,25 @@ __global__ void quantize_sampling_inputs_fixed_lod(uint32_t n_elements, uint32_t
 	inputs[idx + 1] = (y + 0.5) / (float)h;
 }
 
+__global__ void quantize_sampling_inputs_fixed_lod(uint32_t n_elements, uint32_t width, uint32_t height, int lod, float *__restrict__ inputs)
+{
+    if (lod == 0) return;
+
+	uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= n_elements) return;
+
+    quantize_sampling_inputs_inner(i, width, height, lod, inputs);
+}
+
 __global__ void quantize_sampling_inputs_variable_lod(uint32_t n_elements, uint32_t width, uint32_t height, int max_lod, float *__restrict__ lods, float *__restrict__ inputs)
 {
+    if (max_lod == 0) return;
+
 	uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= n_elements) return;
 
 	int lod = (1.f - lods[i]) * max_lod;
-
-	const uint32_t r = 1 << lod;
-	const uint32_t w = width / r;
-	const uint32_t h = height / r;
-
-	const uint32_t idx = i * 2;
-
-	const uint32_t x = (1.f - inputs[idx + 0]) * (float)w;
-	const uint32_t y = (1.f - inputs[idx + 1]) * (float)h;
-	inputs[idx + 0] = (x + 0.5) / (float)w;
-	inputs[idx + 1] = (y + 0.5) / (float)h;
+    quantize_sampling_inputs_inner(i, width, height, lod, inputs);
 }
 
 template <uint32_t stride>
@@ -119,71 +114,6 @@ __global__ void resample_texture_with_lod(uint32_t width, uint32_t height, cudaT
     float4 color = tex2DLod<float4>(texture, x/(float)width, y/(float)height, (float)lod);
     surf2Dwrite(color, output, x * sizeof(float4), y);
 }
-
-struct OpenGLTexture {
-private:
-    GLuint                 opengl_texture;
-    cudaGraphicsResource_t cuda_resource_view;
-
-public:
-    OpenGLTexture(int width, int height)
-    {
-        check_error_gl("Create OpenGL Texture");
-        glGenTextures(1, &opengl_texture);
-        glBindTexture(GL_TEXTURE_2D, opengl_texture); 
-        {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        }
-        glBindTexture(GL_TEXTURE_2D, 0);
-        check_error_gl("Create OpenGL Texture ... OK");
-
-        resize(width, height);
-    }
-
-    ~OpenGLTexture()
-    {
-        glDeleteTextures(1, &opengl_texture);
-    }
-
-    void resize(int width, int height)
-    {
-        check_error_gl("Resize OpenGL Texture");
-        glBindTexture(GL_TEXTURE_2D, opengl_texture); 
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        check_error_gl("Resize OpenGL Texture ... OK");
-
-        CUDA_CHECK_THROW(cudaGraphicsGLRegisterImage(&cuda_resource_view, opengl_texture, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsNone));
-    }
-
-    void bindOpenGLTexture()
-    {
-        glBindTexture(GL_TEXTURE_2D, opengl_texture);
-        check_error_gl("Bind OpenGL Texture");
-    }
-
-    void unbindOpenGLTexture()
-    {
-        glBindTexture(GL_TEXTURE_2D, 0);
-        check_error_gl("Unbind OpenGL Texture");
-    }
-
-    void mapCudaArray(cudaArray_t& array)
-    {
-        // We want to copy cuda_dest_resource data to the texture
-        // map buffer objects to get CUDA device pointers
-        CUDA_CHECK_THROW(cudaGraphicsMapResources(1, &cuda_resource_view, 0));
-        CUDA_CHECK_THROW(cudaGraphicsSubResourceGetMappedArray(&array, cuda_resource_view, 0, 0));
-    }
-
-    void unmapCudaArray(cudaArray_t&)
-    {
-        CUDA_CHECK_THROW(cudaGraphicsUnmapResources(1, &cuda_resource_view, 0));
-    }
-};
 
 const uint32_t batch_size = 1 << 12;
 const uint32_t n_input_dims  = 2; // 2-D image coordinate
@@ -280,8 +210,8 @@ struct NeuralImageCache::Impl
         // Allocate matrices for training and evaluation
         inference_input  = std::make_unique<GPUColumnMatrix>(xs_and_ys.data(), n_input_dims, n_coords_padded);
         inference_result = std::make_unique<GPUColumnMatrix>(n_output_dims, n_coords_padded);
-        training_input    = std::make_unique<GPUColumnMatrix>(n_input_dims, batch_size);
-        training_target   = std::make_unique<GPUColumnMatrix>(n_output_dims, batch_size);
+        training_input   = std::make_unique<GPUColumnMatrix>(n_input_dims, batch_size);
+        training_target  = std::make_unique<GPUColumnMatrix>(n_output_dims, batch_size);
 
         // Input & corresponding RNG
         CURAND_CHECK_THROW(curandCreateGenerator(&rng, CURAND_RNG_PSEUDO_DEFAULT));

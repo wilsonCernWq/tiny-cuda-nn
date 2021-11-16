@@ -4,9 +4,7 @@
 #include <tuple>
 #include <memory>
 
-class NeuralImageCache
-{
-    struct Impl;
+class NeuralImageCache {
 public:
     ~NeuralImageCache();
 
@@ -31,6 +29,7 @@ public:
     float currentLoss();
 
 private:
+    struct Impl;
     std::unique_ptr<Impl> pimpl;  // pointer to the internal implementation
 };
 
