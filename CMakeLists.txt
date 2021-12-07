@@ -20,7 +20,7 @@
 # STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-cmake_minimum_required(VERSION 3.17)
+cmake_minimum_required(VERSION 3.21)
 
 PROJECT(tiny-cuda-nn
 	VERSION 1.1
@@ -28,8 +28,8 @@ PROJECT(tiny-cuda-nn
 	LANGUAGES C CXX CUDA
 )
 
-# set(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda)
-# find_package(CUDAToolkit 11.3 REQUIRED)
+option(TCNN_BUILD_BENCHMARK "Build tiny-cuda-nn example benchmark?" ON)
+option(TCNN_BUILD_EXAMPLES "Build tiny-cuda-nn example applications?" ON)
 
 ###############################################################################
 # Build type and C++ compiler setup
@@ -37,21 +37,23 @@ PROJECT(tiny-cuda-nn
 
 # Set a default configuration if none was specified
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    message(STATUS "No release type specified. Setting to 'Release'.")
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo")
+	message(STATUS "No release type specified. Setting to 'Release'.")
+	set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
+	set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo")
 endif()
 
 if (APPLE)
-    set(CMAKE_MACOSX_RPATH ON)
+	set(CMAKE_MACOSX_RPATH ON)
 endif()
 
 if (MSVC)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /D_CRT_SECURE_NO_WARNINGS")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /D_CRT_SECURE_NO_WARNINGS")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 ###############################################################################
 # CUDA compiler setup
@@ -59,18 +61,33 @@ set(CMAKE_CXX_STANDARD 17)
 
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_EXTENSIONS OFF)
 set(CUDA_LINK_LIBRARIES_KEYWORD PUBLIC)
 
-include(FindCUDA/select_compute_arch)
-cuda_select_nvcc_arch_flags(ARCH_FLAGS)
-list(APPEND CUDA_NVCC_FLAGS ${ARCH_FLAGS})
-
-set(CMAKE_CUDA_ARCHITECTURES off)
+if (DEFINED ENV{TCNN_CUDA_ARCHITECTURES})
+	message(STATUS "Obtained target architecture from environment variable TCNN_CUDA_ARCHITECTURES=$ENV{TCNN_CUDA_ARCHITECTURES}")
+	if (NOT PROJECT_IS_TOP_LEVEL)
+		set(CMAKE_CUDA_ARCHITECTURES $ENV{TCNN_CUDA_ARCHITECTURES} PARENT_SCOPE)
+	endif()
+	set(CMAKE_CUDA_ARCHITECTURES $ENV{TCNN_CUDA_ARCHITECTURES})
+else()
+	# adapted from https://stackoverflow.com/a/69353718
+	include(FindCUDA/select_compute_arch)
+	CUDA_DETECT_INSTALLED_GPUS(INSTALLED_GPU_CCS_1)
+	string(STRIP "${INSTALLED_GPU_CCS_1}" INSTALLED_GPU_CCS_2)
+	string(REPLACE " " ";" INSTALLED_GPU_CCS_3 "${INSTALLED_GPU_CCS_2}")
+	string(REPLACE "." "" CUDA_ARCH_LIST "${INSTALLED_GPU_CCS_3}")
+	if (NOT PROJECT_IS_TOP_LEVEL)
+		set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST} PARENT_SCOPE)
+	endif()
+	set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST})
+	message(STATUS "Automatically detected GPU architectures: ${CUDA_ARCH_LIST}")
+endif()
 
 if (MSVC)
 else()
 	list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=-mf16c")
-	list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=-Wconversion")
+	list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=-Wno-float-conversion")
 	list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=-fno-strict-aliasing")
 endif()
 list(APPEND CUDA_NVCC_FLAGS "--extended-lambda")
@@ -104,5 +121,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL ${CMAKE_BINARY_DIR})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR})
 
 add_subdirectory("src")
-add_subdirectory("samples")
-add_subdirectory("benchmarks/image")
+
+if (TCNN_BUILD_EXAMPLES)
+	add_subdirectory("samples")
+endif()
+if (TCNN_BUILD_BENCHMARK)
+	add_subdirectory("benchmarks/image")
+endif()
