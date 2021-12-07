@@ -1,12 +1,19 @@
 #ifndef NEURAL_CACHE_HPP
 #define NEURAL_CACHE_HPP
 
-
 #include <tuple>
 #include <memory>
 
 class NeuralImageCache {
 public:
+    enum SamplingMode {
+        UNIFORM_RANDOM = 0,
+        UNIFORM_RANDOM_QUANTIZED,
+        TILE_BASED_SIMPLE,
+        TILE_BASED_MIXTURE,
+        TILE_BASED_EVENLY,
+    };
+
     ~NeuralImageCache();
 
     NeuralImageCache(std::string filename);
@@ -14,24 +21,18 @@ public:
     void bindInferenceTexture();    
     void bindReferenceTexture();
 
-    void setLod(int lod);
+    void setLod(int level_of_detail);
+    void setTileSize(int tile_size);
 
     // trigger an evaluation step
     void renderInference();
     void renderReference();
 
     // trigger a training step
-    void train(size_t steps);
+    void train(size_t steps, SamplingMode mode);
 
-    // trigger an actual data access, domain: [0, 1]
-    void access(float x, float y);
-
-    // get current loss
-    float currentLoss();
-
-    void controlQuantizeSample(bool);
-    void controlPauseTraining(bool);
-    void controlIteratingTile(bool, int);
+    // get current training statistics
+    void trainingStats(size_t steps, float& training_loss, float& groundtruth_loss);
 
 private:
     struct Impl;

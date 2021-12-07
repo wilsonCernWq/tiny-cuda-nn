@@ -31,12 +31,15 @@ using namespace glm;
 ArcballCamera camera(vec3(4, 3, -3), vec3(0, 0, 0), vec3(0, 1, 0));
 
 #include "neuralcache.hpp"
-float loss = 0.f;
+size_t steps = 0;
+float tloss = 0.f;
+float gloss = 0.f;
+
 int leve_of_detail = 0;
-int tile_size_rank = 0;
-bool control_quantize_sample = false;
+int tile_size_rank = 8;
+
 bool control_pause_training = false;
-bool control_iterating_tile = false;
+int control_training_mode = (int)NeuralImageCache::TILE_BASED_EVENLY;
 
 static void
 error(int error, const char* description)
@@ -132,14 +135,23 @@ gui(bool* p_open)
   if (ImGui::Begin("Information", NULL, flags)) 
   {
     ImGui::Text("FPS (Hz): %.f\n", fps);
-    ImGui::Text("Loss: %.7f\n", loss);
+    ImGui::Text("Training Loss: %.7f\n", tloss);
+    ImGui::Text("Groundtruth Loss: %.7f\n", gloss);
+    ImGui::Text("Steps: %llu\n", steps);
     ImGui::SliderInt("Level Of Detail", &leve_of_detail, 0, 10);
-    ImGui::Checkbox("Control Quantize Sample", &control_quantize_sample);
+    ImGui::SliderInt("Tile Size Rank", &tile_size_rank, 0, 10);
+
     ImGui::Checkbox("Control Pause Training", &control_pause_training);
-    ImGui::Checkbox("control_iterating_tile", &control_iterating_tile);
-    if (control_iterating_tile) {
-      ImGui::SliderInt("Tile Size Rank", &tile_size_rank, 0, 10);
-    }
+
+    const char* items[] = { 
+      "UNIFORM_RANDOM", 
+      "UNIFORM_RANDOM_QUANTIZED", 
+      "TILE_BASED_SIMPLE", 
+      "TILE_BASED_MIXTURE", 
+      "TILE_BASED_EVENLY" 
+    };
+    ImGui::Combo("Training Mode", &control_training_mode, items, IM_ARRAYSIZE(items));
+
     ImGui::End();
   }
 
@@ -213,7 +225,6 @@ main(const int argc, const char** argv)
 
   NeuralImageCache cache("../data/images/albert.exr");
   // NeuralImageCache cache("../data/images/W8B0747.exr");
-  // NeuralImageCache cache("../data/images/W8B0747_4k.exr");
 
   ivec2 window_size, framebuffer_size;
   glfwGetWindowSize(window, &window_size.x, &window_size.y);
@@ -271,11 +282,12 @@ main(const int argc, const char** argv)
       glDisableVertexAttribArray(0);
   };
 
+  glDisable(GL_DEPTH_TEST);
+
   do {
 
     // Render to the screen
     glClear(GL_COLOR_BUFFER_BIT);
-    glDisable(GL_DEPTH_TEST);
     glViewport(0, 0, framebuffer_size.x/2, framebuffer_size.y);
     {
         draw(false);
@@ -285,19 +297,22 @@ main(const int argc, const char** argv)
         draw(true);
     }
 
-    static int frames = 0;
-    ++frames;
-
-    cache.controlQuantizeSample(control_quantize_sample);
-    cache.controlPauseTraining(control_pause_training);
-    cache.controlIteratingTile(control_iterating_tile, 1 << tile_size_rank);
-
     cache.setLod(leve_of_detail);
-    cache.train(1);
-    cache.renderInference();
-    cache.renderReference();
-    if (frames % 10 == 0 || frames == 1) // dont update this too frequently
-      loss = cache.currentLoss();
+    cache.setTileSize(1 << tile_size_rank);
+
+    if (!control_pause_training) {
+      static int frames = 0;
+
+      cache.train(2, (NeuralImageCache::SamplingMode)control_training_mode);
+      cache.renderInference();
+      cache.renderReference();
+
+      if (frames % 10 == 0) { // dont update this too frequently
+        cache.trainingStats(steps, tloss, gloss);
+      }
+
+      ++frames;
+    }
 
     // Draw GUI
     {
@@ -307,8 +322,7 @@ main(const int argc, const char** argv)
       ImGui::NewFrame();
 
       // - Uncomment below to show ImGui demo window
-      if (imgui_enabled)
-        gui(&imgui_enabled);
+      if (imgui_enabled) gui(&imgui_enabled);
 
       // Render GUI
       ImGui::Render();
