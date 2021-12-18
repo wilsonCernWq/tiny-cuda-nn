@@ -32,7 +32,7 @@ public:
     void train(size_t steps, SamplingMode mode);
 
     // get current training statistics
-    void trainingStats(size_t steps, float& training_loss, float& groundtruth_loss);
+    void trainingStats(size_t& steps, float& training_loss, float& groundtruth_loss);
 
 private:
     struct Impl;

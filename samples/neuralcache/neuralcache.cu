@@ -221,7 +221,7 @@ struct NeuralImageCache::Impl
 
     GPUMemory<float> xs_and_ys;
 
-    GPUMemory<float> groundtruth_data;
+    GPUMemory<float>    groundtruth_data;
     cudaTextureObject_t groundtruth;
 
     openglTextureObject_t reference_opengl_texture;
@@ -243,14 +243,14 @@ struct NeuralImageCache::Impl
     default_rng_t rng{1337};
 
     std::unique_ptr<GPUColumnMatrix> groundtruth_loss_values;
-    float training_loss = 0;
+    float    training_loss = 0;
     uint32_t training_loss_counter = 0;
 
     uint64_t training_step = 0;
 
-    int level_of_detail = 0;
-    int tile_size = 128;
-    int2 tile_dims;
+    int    level_of_detail = 0;
+    int    tile_size = 128;
+    int2   tile_dims;
     float2 tile_scale;
 
     Impl(std::string filename) 
@@ -262,9 +262,9 @@ struct NeuralImageCache::Impl
             }, {
                 "optimizer", {
                     {"otype", "Adam"},
-                    {"learning_rate", 1e-2},
+                    {"learning_rate", 1e-3},
                     {"beta1", 0.9f},
-                    {"beta2", 0.999f},
+                    {"beta2", 0.99f},
                     {"epsilon", 1e-8f},
                     {"l2_reg", 1e-8f},
                 }
@@ -307,10 +307,10 @@ struct NeuralImageCache::Impl
         xs_and_ys.copy_from_host(host_xs_and_ys.data());
 
         // Allocate matrices for training and evaluation
-        inference_input = std::make_unique<GPUColumnMatrix>(xs_and_ys.data(), n_input_dims, n_coords_padded);
+        inference_input  = std::make_unique<GPUColumnMatrix>(xs_and_ys.data(), n_input_dims, n_coords_padded);
         inference_result = std::make_unique<GPUColumnMatrix>(n_output_dims, n_coords_padded);
-        training_input = std::make_unique<GPUColumnMatrix>(n_input_dims, batch_size);
-        training_target = std::make_unique<GPUColumnMatrix>(n_output_dims, batch_size);
+        training_input   = std::make_unique<GPUColumnMatrix>(n_input_dims, batch_size);
+        training_target  = std::make_unique<GPUColumnMatrix>(n_output_dims, batch_size);
 
         groundtruth_loss_values = std::make_unique<GPUColumnMatrix>(1, n_coords_padded);
 
@@ -320,15 +320,15 @@ struct NeuralImageCache::Impl
         training_stream = inference_stream;
 
         // Create the network
-        json encoding_opts = config.value("encoding", json::object());
-        json loss_opts = config.value("loss", json::object());
+        json encoding_opts  = config.value("encoding", json::object());
+        json loss_opts      = config.value("loss", json::object());
         json optimizer_opts = config.value("optimizer", json::object());
-        json network_opts = config.value("network", json::object());
+        json network_opts   = config.value("network", json::object());
 
-        loss = std::shared_ptr<Loss<precision_t>>{create_loss<precision_t>(loss_opts)};
+        loss      = std::shared_ptr<Loss<precision_t>>{create_loss<precision_t>(loss_opts)};
         optimizer = std::shared_ptr<Optimizer<precision_t>>{create_optimizer<precision_t>(optimizer_opts)};
-        network = std::make_shared<NetworkWithInputEncoding<precision_t>>(n_input_dims, n_output_dims, encoding_opts, network_opts);
-        trainer = std::make_shared<Trainer<float, precision_t, precision_t>>(network, optimizer, loss);
+        network   = std::make_shared<NetworkWithInputEncoding<precision_t>>(n_input_dims, n_output_dims, encoding_opts, network_opts);
+        trainer   = std::make_shared<Trainer<float, precision_t, precision_t>>(network, optimizer, loss);
 
         // Initialize values
         renderInference();
@@ -351,6 +351,8 @@ struct NeuralImageCache::Impl
 
     void train(size_t steps, SamplingMode mode)
     {
+        optimizer->set_learning_rate(1e-2); // control learning rate
+
         /* now randomly sample some data */
         for (int i = 0; i < steps; ++i)
         {
@@ -360,14 +362,15 @@ struct NeuralImageCache::Impl
             generate_random_uniform<float>(training_stream, rng, batch_size * n_input_dims, training_input->data());
 
             const uint32_t tile_index = training_step % ((size_t)tile_dims.x * tile_dims.y);
-            float4 tile = make_float4( 
+            float4 tile = make_float4(
                 (tile_index % tile_dims.x) * tile_scale.x,
                 (tile_index / tile_dims.y) * tile_scale.y,
                 tile_scale.x,
                 tile_scale.y
             );
 
-            switch (mode) {
+            switch (mode)
+            {
                 case UNIFORM_RANDOM: {
                     linear_kernel(sample_groundtruth<n_output_dims>, 0, training_stream, batch_size, 
                         0, groundtruth, level_of_detail, training_input->data(), training_target->data());
@@ -526,10 +529,10 @@ void NeuralImageCache::renderReference()
     pimpl->renderReference();
 }
 
-void NeuralImageCache::trainingStats(size_t steps, float& training_loss, float& groundtruth_loss)
+void NeuralImageCache::trainingStats(size_t& steps, float& training_loss, float& groundtruth_loss)
 {
     steps = pimpl->training_step;
     training_loss = pimpl->trainingLoss();
     groundtruth_loss = pimpl->groundtruthLoss();
-    std::cout << "step=" << steps << "\ttloss=" << training_loss << "\tgloss=" << groundtruth_loss <<std::endl;
+    std::cout << "step=" << steps << "\ttloss=" << training_loss << "\tgloss=" << groundtruth_loss << std::endl;
 }

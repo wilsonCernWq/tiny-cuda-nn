@@ -8,8 +8,9 @@
 
 // Include standard headers
 #include <chrono>
-#include <stdio.h>
-#include <stdlib.h>
+#include <string>
+#include <cstdio>
+#include <cstdlib>
 
 #include "shaders.h"
 #include "util.h"
@@ -39,7 +40,7 @@ int leve_of_detail = 0;
 int tile_size_rank = 8;
 
 bool control_pause_training = false;
-int control_training_mode = (int)NeuralImageCache::TILE_BASED_EVENLY;
+int control_training_mode = (int)NeuralImageCache::UNIFORM_RANDOM;
 
 static void
 error(int error, const char* description)
@@ -221,6 +222,9 @@ init()
 int
 main(const int argc, const char** argv)
 {
+  if (argc > 1)
+    control_training_mode = std::stoi(std::string(argv[1]));
+
   init();
 
   NeuralImageCache cache("../data/images/albert.exr");
@@ -303,15 +307,18 @@ main(const int argc, const char** argv)
     if (!control_pause_training) {
       static int frames = 0;
 
-      cache.train(2, (NeuralImageCache::SamplingMode)control_training_mode);
-      cache.renderInference();
-      cache.renderReference();
-
       if (frames % 10 == 0) { // dont update this too frequently
         cache.trainingStats(steps, tloss, gloss);
       }
 
+      cache.train(2, (NeuralImageCache::SamplingMode)control_training_mode);
+      cache.renderInference();
+      cache.renderReference();
+
       ++frames;
+
+      if (steps > 20000) 
+        break;
     }
 
     // Draw GUI
