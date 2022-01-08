@@ -1,0 +1,5 @@
+{
+    "cmake.configureSettings": {
+        "TBB_DIR": "C:\\Users\\wilson\\Work\\softwares\\intel-environment\\oneapi-tbb-2021.1.1-win\\oneapi-tbb-2021.1.1\\lib\\cmake\\tbb",
+    }
+}
