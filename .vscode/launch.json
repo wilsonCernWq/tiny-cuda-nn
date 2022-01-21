@@ -13,7 +13,7 @@
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/build",
             "environment": [],
-            "console": "externalTerminal"
+            "console": "integratedTerminal"
         },
         {
             "name": "(Windows) Volume",
@@ -29,7 +29,7 @@
                     "value": "C:\\Users\\wilson\\Work\\softwares\\intel-environment\\oneapi-tbb-2021.1.1-win\\oneapi-tbb-2021.1.1\\redist\\intel64\\vc14;${env:PATH}"
                 }
             ],
-            "console": "externalTerminal"
+            "console": "integratedTerminal"
         }
     ]
 }
