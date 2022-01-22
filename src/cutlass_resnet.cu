@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -99,70 +99,11 @@ m_output_activation{output_activation}
 template <typename T, Activation input_activation>
 CutlassResNet<T, input_activation>::~CutlassResNet() {
 	for (size_t i = 0; i < m_training_splitk_streams.size(); ++i) {
-		free_workspace(m_training_splitk_streams[i]);
+		cutlass_free_workspace(m_training_splitk_streams[i]);
 
 		CUDA_CHECK_PRINT(cudaEventDestroy(m_training_splitk_events[i]));
 		CUDA_CHECK_PRINT(cudaStreamDestroy(m_training_splitk_streams[i]));
 	}
-}
-
-template <typename T, typename arch>
-std::enable_if_t<std::is_same<arch, cutlass::arch::Sm75>::value && std::is_same<__half, T>::value> residual_block_2_inference(
-	cudaStream_t stream,
-	const GPUMatrix<T>& input,
-	const GPUMatrix<T, RM>& weights1,
-	const GPUMatrix<T, RM>& weights2,
-	GPUMatrix<T>& output
-) {
-	auto transposed_output = output.transposed();
-
-	switch (weights1.n()) {
-		case 64:
-			fc_multiply_b2b<FullLayerB2bPreReLU64, FullLayerB2bPreReLU64>(
-				stream,
-				input.transposed(),
-				weights1.transposed(),
-				transposed_output,
-				weights2.transposed(),
-				input.transposed(),
-				transposed_output,
-				Activation::None, // ReLU is taken care of by layout above
-				Activation::None,
-				false, // transfer
-				false,
-				true // Sum into the main branch
-			);
-			break;
-		case 128:
-			fc_multiply_b2b<FullLayerB2bPreReLU128, FullLayerB2bPreReLU128>(
-				stream,
-				input.transposed(),
-				weights1.transposed(),
-				transposed_output,
-				weights2.transposed(),
-				input.transposed(),
-				transposed_output,
-				Activation::None, // ReLU is taken care of by layout above
-				Activation::None,
-				false, // transfer
-				false,
-				true // Sum into the main branch
-			);
-			break;
-		default:
-			throw std::runtime_error{"Invalid layer size (must be 64, 128, or 256)."};
-	}
-}
-
-template <typename T, typename arch>
-std::enable_if_t<!(std::is_same<arch, cutlass::arch::Sm75>::value && std::is_same<__half, T>::value)> residual_block_2_inference(
-	cudaStream_t,
-	const GPUMatrix<T>&,
-	const GPUMatrix<T, RM>&,
-	const GPUMatrix<T, RM>&,
-	GPUMatrix<T>&
-) {
-	// Dummy implementation for successful compilation when Sm75 is not available
 }
 
 template <typename T, Activation input_activation>
@@ -188,17 +129,11 @@ void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t 
 		throw std::runtime_error(std::string("Input and output don't have matching batch size: ") + std::to_string(input.n()) + "!=" + std::to_string(output.n()));
 	}
 
-	// Make sure our teporary buffers have the correct size for the given batch size
+	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = input.n();
 	if (m_inference_linear_tmp.n() != batch_size) {
 		allocate_inference_buffers(batch_size);
 	}
-
-	const bool can_fuse_residual_block =
-		std::is_same<SmArch, cutlass::arch::Sm75>::value &&
-		std::is_same<__half, T>::value &&
-		m_n_matrices_per_block == 2 &&
-		(m_network_width == 128 || m_network_width == 64);
 
 	// Run the actual network
 	{
@@ -207,19 +142,6 @@ void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t 
 
 		// Res blocks
 		for (uint32_t i = 0; i < m_n_blocks; ++i) {
-			// Compute a residual block using a _single_ fused back-to-back matrix multiplication when applicable.
-			if (can_fuse_residual_block) {
-				residual_block_2_inference<T, SmArch>(
-					stream,
-					i == 0 ? m_inference_linear_tmp : m_inference_residual_tmp[i % 2],
-					weight_matrix_at(use_inference_matrices, i, 0),
-					weight_matrix_at(use_inference_matrices, i, 1),
-					m_inference_residual_tmp[(i + 1) % 2]
-				);;
-
-				continue;
-			}
-
 			fc_multiply<FullLayerPreReLU>(stream, weight_matrix_at(use_inference_matrices, i, 0), m_inference_linear_tmp, m_inference_residual_tmp[0]);
 
 			for (uint32_t matrix_idx = 1; matrix_idx < m_n_matrices_per_block - 1; ++matrix_idx) {
@@ -245,10 +167,8 @@ void CutlassResNet<T, input_activation>::inference_mixed_precision(cudaStream_t 
 			}
 		}
 
-		auto& output_matrix = can_fuse_residual_block ? m_inference_residual_tmp[m_n_blocks % 2] : m_inference_linear_tmp;
-
 		// Output
-		fc_multiply<LastLayer>(stream, output_weight_matrix(use_inference_matrices), output_matrix, output, m_output_activation);
+		fc_multiply<LastLayer>(stream, output_weight_matrix(use_inference_matrices), m_inference_linear_tmp, output, m_output_activation);
 	}
 }
 
@@ -267,7 +187,7 @@ void CutlassResNet<T, input_activation>::forward(cudaStream_t stream, const GPUM
 		throw std::runtime_error(std::string("Input and output don't have matching batch size: ") + std::to_string(input.n()) + "!=" + std::to_string(output->n()));
 	}
 
-	// Make sure our teporary buffers have the correct size for the given batch size
+	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = input.n();
 	if (m_forward_tmp.front().n() != batch_size) {
 		allocate_forward_buffers(batch_size);
@@ -336,7 +256,7 @@ void CutlassResNet<T, input_activation>::backward(
 		throw std::runtime_error(std::string("Output gradients have incorrect width (must be padded): ") + std::to_string(dL_doutput.m()) + "!=" + std::to_string(m_padded_output_width));
 	}
 
-	// Make sure our teporary buffers have the correct size for the given batch size
+	// Make sure our temporary buffers have the correct size for the given batch size
 	uint32_t batch_size = dL_doutput.n();
 	if (m_backward_tmp.front().n() != batch_size) {
 		allocate_backward_buffers(batch_size);
@@ -463,18 +383,25 @@ void CutlassResNet<T, input_activation>::allocate_backward_buffers(uint32_t batc
 }
 
 template <typename T, Activation input_activation>
-void CutlassResNet<T, input_activation>::initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
+void CutlassResNet<T, input_activation>::set_params(T* params, T* inference_params, T* backward_params, T* gradients) {
 	size_t current_pos = 0;
 	for (size_t i = 0; i < m_weight_matrices.size(); ++i) {
 		m_weight_matrices[i].set_data(params + current_pos);
 		m_weight_matrices_inference[i].set_data(inference_params + current_pos);
-		m_weight_matrices_full_precision[i].set_data(params_full_precision + current_pos);
 		m_gradient_matrices[i].set_data(gradients + current_pos);
 		current_pos += m_weight_matrices[i].n_elements();
 	}
+}
 
-	// Initialize the params
+template <typename T, Activation input_activation>
+void CutlassResNet<T, input_activation>::initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
+	set_params(params, inference_params, backward_params, gradients);
+
+	size_t current_pos = 0;
 	for (size_t i = 0; i < m_weight_matrices_full_precision.size(); ++i) {
+		m_weight_matrices_full_precision[i].set_data(params_full_precision + current_pos);
+		current_pos += m_weight_matrices_full_precision[i].n_elements();
+
 		if (i == 0 && input_activation_value == Activation::Sine) {
 			m_weight_matrices_full_precision[i].initialize_siren_uniform_first(rnd, scale);
 		} else {

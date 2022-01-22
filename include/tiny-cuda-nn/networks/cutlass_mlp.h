@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -36,11 +36,9 @@
 #include <tiny-cuda-nn/network.h>
 #include <tiny-cuda-nn/gpu_matrix.h>
 #include <tiny-cuda-nn/gpu_memory.h>
-#include <tiny-cuda-nn/misc_kernels.h>
 
 #include <array>
-#include <iostream>
-#include <memory>
+#include <vector>
 
 
 TCNN_NAMESPACE_BEGIN
@@ -71,6 +69,7 @@ public:
 		bool compute_param_gradients = true
 	) override;
 
+	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override;
 	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override;
 
 	GPUMatrix<T, RM>& input_weight_matrix(bool inference) {
@@ -152,6 +151,8 @@ private:
 
 	Activation m_activation;
 	Activation m_output_activation;
+
+	bool m_can_fuse_activation;
 
 	static const uint32_t tensorcore_width = 8;
 

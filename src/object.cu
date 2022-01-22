@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -31,11 +31,10 @@
 #include <tiny-cuda-nn/object.h>
 
 #include <tiny-cuda-nn/common.h>
-#include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/common_device.h>
 
 
 TCNN_NAMESPACE_BEGIN
-
 
 template <typename T>
 __global__ void one_hot_batched_kernel(const uint32_t num_elements, const uint32_t width, const uint32_t one_hot_dim, T* out, float scale) {
@@ -61,6 +60,5 @@ void mult(cudaStream_t stream, const uint32_t num_elements, T* inout, float fact
 
 template void mult(cudaStream_t stream, const uint32_t num_elements, float* inout, float factor);
 template void mult(cudaStream_t stream, const uint32_t num_elements, __half* inout, float factor);
-
 
 TCNN_NAMESPACE_END

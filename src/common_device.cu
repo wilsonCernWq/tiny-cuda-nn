@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -23,24 +23,15 @@
  *//*
  */
 
-/** @file   cutlass_matmul_interface.h
- *  @author Thomas Müller, NVIDIA
- *  @brief  Matrix multiplication template interface. Separated into its own header file to improve
- *          compilation speed.
+/** @file   common_device.cu
+ *  @author Thomas Müller & Nikolaus Binder, NVIDIA
+ *  @brief  Implementation of various miscellaneous CUDA kernels and
+            device functions.
  */
 
-#pragma once
-
-#include <tiny-cuda-nn/common.h>
-#include <tiny-cuda-nn/gpu_matrix.h>
-#include <tiny-cuda-nn/misc_kernels.h>
-
-#include <cutlass/half.h>
+#include <tiny-cuda-nn/common_device.h>
 
 
 TCNN_NAMESPACE_BEGIN
-
-template <Activation activation, typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeC, MatrixLayout LayoutC, typename TypeD, MatrixLayout LayoutD>
-void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrix<TypeC, LayoutC>& C, GPUMatrix<TypeD, LayoutD>& D, network_precision_t beta = (network_precision_t)0, network_precision_t alpha = (network_precision_t)1);
 
 TCNN_NAMESPACE_END

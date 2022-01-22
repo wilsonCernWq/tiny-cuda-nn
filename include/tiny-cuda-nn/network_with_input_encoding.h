@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -59,7 +59,7 @@ public:
 	virtual ~NetworkWithInputEncoding() { }
 
 	void inference(cudaStream_t stream, const GPUMatrix<float>& input, GPUMatrix<float>& output) override {
-		// Make sure our teporary buffers have the correct size for the given batch size
+		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		if (m_inference_network_input.n() != batch_size) {
 			allocate_inference_buffers(batch_size);
@@ -78,7 +78,7 @@ public:
 	}
 
 	void inference_mixed_precision(cudaStream_t stream, const GPUMatrix<float>& input, GPUMatrixDynamic<T>& output, bool use_inference_matrices = true) override {
-		// Make sure our teporary buffers have the correct size for the given batch size
+		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		if (m_inference_network_input.n() != batch_size) {
 			allocate_inference_buffers(batch_size);
@@ -93,7 +93,7 @@ public:
 	}
 
 	void forward(cudaStream_t stream, const GPUMatrix<float>& input, GPUMatrixDynamic<T>* output = nullptr, bool use_inference_matrices = false, bool prepare_input_gradients = false) override {
-		// Make sure our teporary buffers have the correct size for the given batch size
+		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		if (m_forward_network_input.n() != batch_size) {
 			allocate_forward_buffers(batch_size);
@@ -119,7 +119,7 @@ public:
 		bool use_inference_matrices = false,
 		bool compute_param_gradients = true
 	) override {
-		// Make sure our teporary buffers have the correct size for the given batch size
+		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		if (m_backward_dL_dnetwork_input.n() != batch_size) {
 			allocate_backward_buffers(batch_size);
@@ -141,6 +141,25 @@ public:
 				{input.data(), input.m()}
 			);
 		}
+	}
+
+	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override {
+		size_t offset = 0;
+		m_network->set_params(
+			params + offset,
+			inference_params + offset,
+			backward_params + offset,
+			gradients + offset
+		);
+		offset += m_network->n_params();
+
+		m_encoding->set_params(
+			params + offset,
+			inference_params + offset,
+			backward_params + offset,
+			gradients + offset
+		);
+		offset += m_encoding->n_params();
 	}
 
 	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override {

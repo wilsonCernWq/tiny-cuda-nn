@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -33,7 +33,7 @@
 #include <tiny-cuda-nn/common.h>
 #include <tiny-cuda-nn/encoding.h>
 #include <tiny-cuda-nn/gpu_memory.h>
-#include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/common_device.h>
 
 #include <numeric>
 #include <stdexcept>
@@ -181,7 +181,7 @@ public:
 	}
 
 	void set_alignment(uint32_t alignment) override {
-		alignment = std::lcm(alignment, min_alignment());
+		alignment = lcm(alignment, min_alignment());
 		m_n_padded_output_dims = next_multiple(m_n_output_dims, alignment);
 		m_n_to_pad = m_n_padded_output_dims - m_n_output_dims;
 	}

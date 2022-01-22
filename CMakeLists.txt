@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without modification, are permitted
 # provided that the following conditions are met:
@@ -20,12 +20,13 @@
 # STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.18)
 
-PROJECT(tiny-cuda-nn
-	VERSION 1.1
-	DESCRIPTION "A tiny, fast neural network with a fixed structure in CUDA"
-	LANGUAGES C CXX CUDA
+PROJECT(
+	tiny-cuda-nn
+	VERSION 1.4
+	DESCRIPTION "Lightning fast & tiny C++/CUDA neural network framework"
+	LANGUAGES CXX CUDA
 )
 
 option(TCNN_BUILD_BENCHMARK "Build tiny-cuda-nn example benchmark?" ON)
@@ -51,7 +52,7 @@ if (MSVC)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -59,29 +60,65 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # CUDA compiler setup
 ###############################################################################
 
-set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 14)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 set(CUDA_LINK_LIBRARIES_KEYWORD PUBLIC)
 
+get_directory_property(TCNN_HAS_PARENT PARENT_DIRECTORY)
+
+# adapted from https://stackoverflow.com/a/69353718
+include(FindCUDA/select_compute_arch)
+CUDA_DETECT_INSTALLED_GPUS(INSTALLED_GPU_CCS_1)
+string(STRIP "${INSTALLED_GPU_CCS_1}" INSTALLED_GPU_CCS_2)
+string(REPLACE " " ";" INSTALLED_GPU_CCS_3 "${INSTALLED_GPU_CCS_2}")
+string(REPLACE "." "" CUDA_ARCH_LIST "${INSTALLED_GPU_CCS_3}")
+set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST})
+
+# Remove unsupported architectures
+list(REMOVE_ITEM CMAKE_CUDA_ARCHITECTURES "86+PTX")
+
 if (DEFINED ENV{TCNN_CUDA_ARCHITECTURES})
 	message(STATUS "Obtained target architecture from environment variable TCNN_CUDA_ARCHITECTURES=$ENV{TCNN_CUDA_ARCHITECTURES}")
-	if (NOT PROJECT_IS_TOP_LEVEL)
-		set(CMAKE_CUDA_ARCHITECTURES $ENV{TCNN_CUDA_ARCHITECTURES} PARENT_SCOPE)
-	endif()
 	set(CMAKE_CUDA_ARCHITECTURES $ENV{TCNN_CUDA_ARCHITECTURES})
-else()
-	# adapted from https://stackoverflow.com/a/69353718
-	include(FindCUDA/select_compute_arch)
-	CUDA_DETECT_INSTALLED_GPUS(INSTALLED_GPU_CCS_1)
-	string(STRIP "${INSTALLED_GPU_CCS_1}" INSTALLED_GPU_CCS_2)
-	string(REPLACE " " ";" INSTALLED_GPU_CCS_3 "${INSTALLED_GPU_CCS_2}")
-	string(REPLACE "." "" CUDA_ARCH_LIST "${INSTALLED_GPU_CCS_3}")
-	if (NOT PROJECT_IS_TOP_LEVEL)
-		set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST} PARENT_SCOPE)
+endif()
+
+# If the CUDA version does not permit targeting Ampere, don't do so.
+if ((80 IN_LIST CMAKE_CUDA_ARCHITECTURES OR 86 IN_LIST CMAKE_CUDA_ARCHITECTURES) AND CUDA_VERSION VERSION_LESS 11.0)
+	message(WARNING "CUDA version ${CUDA_VERSION} is too low for targeting Ampere GPUs. Reverting to compute capability 75.")
+	list(REMOVE_ITEM CMAKE_CUDA_ARCHITECTURES 80 86)
+	if (NOT CMAKE_CUDA_ARCHITECTURES)
+		list(APPEND CMAKE_CUDA_ARCHITECTURES 75)
 	endif()
-	set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST})
-	message(STATUS "Automatically detected GPU architectures: ${CUDA_ARCH_LIST}")
+endif()
+
+# Sort the list to obtain lowest architecture that must be compiled for.
+list(SORT CMAKE_CUDA_ARCHITECTURES COMPARE NATURAL ORDER ASCENDING)
+list(GET CMAKE_CUDA_ARCHITECTURES 0 MIN_GPU_ARCH)
+
+message(STATUS "Targeting GPU architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+if (TCNN_HAS_PARENT)
+	set(CMAKE_CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES} PARENT_SCOPE)
+endif()
+
+if (MIN_GPU_ARCH LESS_EQUAL 70)
+	message(WARNING
+		"Fully fused MLPs do not support GPU architectures of 70 or less. "
+		"Falling back to CUTLASS MLPs. Remove GPU architectures 70 and lower "
+		"to allow maximum performance"
+	)
+endif()
+
+list(APPEND TCNN_DEFINITIONS -DTCNN_MIN_GPU_ARCH=${MIN_GPU_ARCH})
+if (CUDA_VERSION VERSION_GREATER_EQUAL 11.0)
+	# Only compile the shampoo optimizer if
+	# a new enough cuBLAS version is available.
+	list(APPEND TCNN_DEFINITIONS -DTCNN_SHAMPOO)
+endif()
+
+add_definitions(${TCNN_DEFINITIONS})
+if (TCNN_HAS_PARENT)
+	set(TCNN_DEFINITIONS ${TCNN_DEFINITIONS} PARENT_SCOPE)
 endif()
 
 if (MSVC)

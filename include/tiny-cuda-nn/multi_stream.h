@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -113,7 +113,7 @@ public:
 
 	cudaStream_t get(size_t idx) {
 		if (idx >= m_n_streams) {
-			throw std::runtime_error{"MultiStream: invalid stream index requested: "s + std::to_string(idx) + "/"s + std::to_string(m_n_streams)};
+			throw std::runtime_error{std::string{"MultiStream: invalid stream index requested: "} + std::to_string(idx) + "/" + std::to_string(m_n_streams)};
 		}
 		return m_streams.at(idx).get();
 	}
@@ -136,37 +136,51 @@ inline MultiStream* get_multi_stream(cudaStream_t stream, size_t n_streams) {
 // RAII wrapper around MultiStream
 struct SyncedMultiStream {
 public:
-	SyncedMultiStream(cudaStream_t stream, size_t n_streams) : m_main_stream{stream} {
+	SyncedMultiStream(cudaStream_t stream, size_t n_streams) : m_main_stream{stream}, m_n_stream{n_streams} {
 		if (n_streams == 0) {
 			throw std::runtime_error{"SyncedMultiStream: must request at least one stream"};
+		} else if (n_streams == 1) {
+			return;
 		}
 
-		m_multi_stream = get_multi_stream(stream, n_streams-1);
+		m_multi_stream = get_multi_stream(stream, n_streams);
 		m_multi_stream->wait_for(stream);
 	}
 
 	~SyncedMultiStream() {
-		if (m_main_stream) {
+		if (m_multi_stream) {
 			m_multi_stream->signal(m_main_stream);
 		}
 	}
 
 	// Only allow moving of these guys. No copying.
 	SyncedMultiStream(const SyncedMultiStream&) = delete;
-	SyncedMultiStream(SyncedMultiStream&& other) : m_main_stream{other.m_main_stream} {
-		other.m_main_stream = {};
+	SyncedMultiStream(SyncedMultiStream&& other) {
+		std::swap(m_multi_stream, other.m_multi_stream);
+		std::swap(m_main_stream, other.m_main_stream);
+		std::swap(m_n_stream, other.m_n_stream);
 	}
 
 	cudaStream_t get(size_t idx) {
-		if (idx == 0) {
-			return m_main_stream;
+		if (m_n_stream == 1) {
+			if (idx == 0) {
+				return m_main_stream;
+			} else {
+				throw std::runtime_error{"SyncedMultiStream: invalid stream index requested (single multistream)"};
+			}
 		}
-		return m_multi_stream->get(idx-1);
+
+		if (!m_multi_stream) {
+			throw std::runtime_error{"SyncedMultiStream: invalid multistream"};
+		}
+
+		return m_multi_stream->get(idx);
 	}
 
 private:
-	MultiStream* m_multi_stream;
-	cudaStream_t m_main_stream;
+	MultiStream* m_multi_stream = nullptr;
+	cudaStream_t m_main_stream = nullptr;
+	size_t m_n_stream;
 };
 
 TCNN_NAMESPACE_END

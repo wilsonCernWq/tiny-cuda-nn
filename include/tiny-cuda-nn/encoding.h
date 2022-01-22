@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -39,6 +39,7 @@
 TCNN_NAMESPACE_BEGIN
 
 enum InterpolationType {
+	Nearest,
 	Linear,
 	Smoothstep,
 };
@@ -77,6 +78,7 @@ public:
 	virtual uint32_t min_alignment() const = 0;
 
 	// By default, an encoding has no parameters
+	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override { }
 	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override { }
 	size_t n_params() const override { return 0; }
 

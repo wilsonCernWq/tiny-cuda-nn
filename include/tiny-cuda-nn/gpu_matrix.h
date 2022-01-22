@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -63,7 +63,7 @@ public:
 			total_n_bytes += matrix->n_bytes();
 		}
 
-		if (memory.get_num_elements() < total_n_bytes) {
+		if (memory.bytes() < total_n_bytes) {
 #ifdef TCNN_VERBOSE_MEMORY_ALLOCS
 			std::cout << "GPUMatrix: Allocating " << bytes_to_string(total_n_bytes) << " shared among " << matrices.size() << " matrices." << std::endl;
 #endif
@@ -89,9 +89,9 @@ class GPUMatrixDynamic : public GPUMatrixBase {
 public:
 	using Type = T;
 
-	// Owning its memory (passing a stream uses async allocation)
-	GPUMatrixDynamic(uint32_t m, uint32_t n, MatrixLayout layout = CM, cudaStream_t stream = nullptr)
-	: m_owned_data{m * n, stream}, m_rows{m}, m_cols{n}, m_layout{layout} {
+	// Owning its memory
+	GPUMatrixDynamic(uint32_t m, uint32_t n, MatrixLayout layout = CM)
+	: m_owned_data{m * n}, m_rows{m}, m_cols{n}, m_layout{layout} {
 		m_data = m_owned_data.data();
 	}
 
@@ -103,7 +103,7 @@ public:
 	GPUMatrixDynamic() : GPUMatrixDynamic(nullptr, 0, 0) {}
 
 	GPUMatrixDynamic(GPUMatrixDynamic<T>&& other) : m_data{other.m_data}, m_rows{other.m_rows}, m_cols{other.m_cols}, m_layout{other.m_layout}, m_owned_data{std::move(other.m_owned_data)} { }
-	explicit GPUMatrixDynamic(const GPUMatrixDynamic<T>& other) : m_data{other.m_data}, m_rows{other.m_rows}, m_cols{other.m_cols}, m_layout{other.m_layout}, m_owned_data{other.m_owned_data} {
+	explicit GPUMatrixDynamic(const GPUMatrixDynamic<T>& other) : m_data{other.m_data}, m_rows{other.m_rows}, m_cols{other.m_cols}, m_layout{other.m_layout}, m_owned_data{other.m_owned_data.copy()} {
 		// If we just copied over some owned data, then we want to point to our copy
 		if (m_owned_data.data()) {
 			m_data = m_owned_data.data();
@@ -289,15 +289,15 @@ private:
 	GPUMemory<T> m_owned_data;
 };
 
-template <typename T, MatrixLayout _layout>
+template <typename T, MatrixLayout _layout = MatrixLayout::ColumnMajor>
 class GPUMatrix : public GPUMatrixDynamic<T> {
 public:
 	static const MatrixLayout static_layout = _layout;
 	static const MatrixLayout static_transposed_layout = _layout == RM ? CM : RM;
 
-	// Owning its memory (passing a stream uses async allocation)
-	GPUMatrix(uint32_t m, uint32_t n, cudaStream_t stream = nullptr)
-	: GPUMatrixDynamic<T>{m, n, static_layout, stream} { }
+	// Owning its memory
+	GPUMatrix(uint32_t m, uint32_t n)
+	: GPUMatrixDynamic<T>{m, n, static_layout} { }
 
 	// Pointing to external memory
 	explicit GPUMatrix(T* data, uint32_t m, uint32_t n)

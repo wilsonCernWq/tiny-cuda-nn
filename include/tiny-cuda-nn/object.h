@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -42,12 +42,6 @@ TCNN_NAMESPACE_BEGIN
 
 using json = nlohmann::json;
 
-template<typename T>
-class GPUMatrixDynamic;
-
-template<typename T, MatrixLayout _layout = MatrixLayout::ColumnMajor>
-class GPUMatrix;
-
 class Object {
 public:
 	virtual ~Object() { }
@@ -65,6 +59,7 @@ class ParametricObject : public Object {
 public:
 	virtual ~ParametricObject() { }
 
+	virtual void set_params(PARAMS_T* params, PARAMS_T* inference_params, PARAMS_T* backward_params, PARAMS_T* gradients) = 0;
 	virtual void initialize_params(pcg32& rnd, float* params_full_precision, PARAMS_T* params, PARAMS_T* inference_params, PARAMS_T* backward_params, PARAMS_T* gradients, float scale = 1) = 0;
 	virtual size_t n_params() const = 0;
 
@@ -130,7 +125,7 @@ public:
 		GPUMatrix<T>& d_dinput,
 		float backprop_scale = 128.0f // Prevents underflows during half-precision backprop. Same reason for loss_scale to exist.
 	) {
-		// Make sure our teporary buffers have the correct size for the given batch size
+		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		if (m_input_gradient_output.n() != batch_size) {
 			allocate_input_gradient_buffers(batch_size);

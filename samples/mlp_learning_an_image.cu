@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -29,7 +29,7 @@
             2D function that represents an image.
  */
 
-#include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/common_device.h>
 
 #include <tiny-cuda-nn/config.h>
 
@@ -94,32 +94,20 @@ __global__ void eval_image(uint32_t n_elements, cudaTextureObject_t texture, flo
 }
 
 int main(int argc, char* argv[]) {
-	if (!(__CUDACC_VER_MAJOR__ > 10 || (__CUDACC_VER_MAJOR__ == 10 && __CUDACC_VER_MINOR__ >= 2))) {
-		std::cout << "Turing Tensor Core operations must be compiled with CUDA 10.2 Toolkit or later." << std::endl;
-		return -1;
-	}
-
-	cudaDeviceProp props;
-
-	cudaError_t error = cudaGetDeviceProperties(&props, 0);
-	if (error != cudaSuccess) {
-		std::cout << "cudaGetDeviceProperties() returned an error: " << cudaGetErrorString(error) << std::endl;
-		return -1;
-	}
-
-	if (!((props.major * 10 + props.minor) >= 75)) {
-		std::cout << "Turing Tensor Core operations must be run on a machine with compute capability at least 75."
-					<< std::endl;
-		return -1;
-	}
-
-	if (argc < 2) {
-		std::cout << "USAGE: " << argv[0] << " " << "path-to-image.exr [path-to-optional-config.json]" << std::endl;
-		std::cout << "Sample EXR files are provided in 'data/images'." << std::endl;
-		return 0;
-	}
-
 	try {
+		uint32_t compute_capability = cuda_compute_capability();
+		if (compute_capability < MIN_GPU_ARCH) {
+			std::cerr
+				<< "Warning: Insufficient compute capability " << compute_capability << " detected. "
+				<< "This program was compiled for >=" << MIN_GPU_ARCH << " and may thus behave unexpectedly." << std::endl;
+		}
+
+		if (argc < 2) {
+			std::cout << "USAGE: " << argv[0] << " " << "path-to-image.exr [path-to-optional-config.json]" << std::endl;
+			std::cout << "Sample EXR files are provided in 'data/images'." << std::endl;
+			return 0;
+		}
+
 		json config = {
 			{"loss", {
 				{"otype", "RelativeL2"}
@@ -147,7 +135,7 @@ int main(int argc, char* argv[]) {
 				// {"otype", "CutlassMLP"},
 				// {"otype", "CutlassResNet"},
 				{"n_neurons", 64},
-				{"n_layers", 4},
+				{"n_hidden_layers", 4},
 				{"activation", "ReLU"},
 				{"output_activation", "None"},
 			}},

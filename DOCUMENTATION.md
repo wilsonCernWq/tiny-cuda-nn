@@ -1,8 +1,8 @@
 # JSON Configuration Documentation
 
-This documentation so far only contains the JSON parameters for configuring each component of __tiny-cuda-nn__.
+This document lists the JSON parameters of all components of __tiny-cuda-nn__.
 
-For each component, we provide a sample configuration with each parameter's default value.
+For each component, we provide a sample configuration that lists each parameter's default value.
 
 ## Networks
 
@@ -27,7 +27,7 @@ The following activation functions are supported:
 
 ### Fully Fused MLP
 
-Lightning fast implementation of small multi-layer perceptrons (MLPs). Restricted to hidden layers of size 32, 64, or 128 and outputs of 16 or fewer dimensions.
+Lightning fast implementation of small multi-layer perceptrons (MLPs). Restricted to hidden layers of size 16, 32, 64, or 128.
 
 ```json5
 {
@@ -35,7 +35,7 @@ Lightning fast implementation of small multi-layer perceptrons (MLPs). Restricte
 	"activation": "ReLU",        // Activation of hidden layers.
 	"output_activation": "None", // Activation of the output layer.
 	"n_neurons": 128,            // Neurons in each hidden layer.
-	                             // May only be 32, 64 or 128.
+	                             // May only be 16, 32, 64, or 128.
 	"n_hidden_layers": 5,        // Number of hidden layers.
 	"feedback_alignment": false  // Use feedback alignment
 	                             // [Lillicrap et al. 2016].
@@ -75,6 +75,79 @@ The hidden layers always use ReLU activations for performance reasons.
 
 ## Encodings
 
+
+### Composite
+
+Allows composing multiple encodings. The following example replicates the Neural Radiance Caching [[Müller et al. 2021]](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf) encoding by composing the `TriangleWave` encoding for the first 3 (spatial) dimensions, the `OneBlob` encoding for the following 5 non-linear appearance dimensions, and the `Identity` for all remaining dimensions.
+
+```json5
+{
+	"otype": "Composite",
+	"nested": [
+		{
+			"n_dims_to_encode": 3, // Spatial dims
+			"otype": "TriangleWave",
+			"n_frequencies": 12
+		},
+		{
+			"n_dims_to_encode": 5, // Non-linear appearance dims.
+			"otype": "OneBlob",
+			"n_bins": 4
+		},
+		{
+			// Number of remaining linear dims is automatically derived
+			"otype": "Identity"
+		}
+	]
+}
+```
+
+### Frequency
+
+From NeRF [[Mildenhall et al. 2020]](https://www.matthewtancik.com/nerf). Works better than OneBlob encoding if the dynamic range of the encoded dimension is high. However, suffers from stripe artifacts.
+
+The number of encoded dimensions is twice the specified number of frequencies for each input dimension.
+
+```json5
+{
+	"otype": "Frequency", // Component type.
+	"n_frequencies": 12   // Number of frequencies (sin & cos)
+	                      // per encoded dimension.
+}
+```
+
+### Grid
+
+Encoding based on trainable multiresolution grids.
+Used for [Instant Neural Graphics Primitives [Müller et al. 2022]](https://nvlabs.github.io/instant-ngp/). The grids can be backed by hashtables, dense storage, or tiled storage.
+
+The number of encoded dimensions is `n_levels * n_features_per_level`.
+
+```json5
+{
+	"otype": "Grid",           // Component type.
+	"type": "Hash",            // Type of backing storage of the
+	                           // grids. Can be "Hash", "Tiled"
+	                           // or "Dense".
+	"n_levels": 16,            // Number of levels (resolutions)
+	"n_features_per_level": 2, // Dimensionality of feature vector
+	                           // stored in each level's entries.
+	"log2_hashmap_size": 19,   // If type is "Hash", is the base-2
+	                           // logarithm of the number of elements
+	                           // in each backing hash table.
+	"base_resolution": 16,     // The resolution of the coarsest le-
+	                           // vel is base_resolution^input_dims.
+	"per_level_scale": 2.0,    // The geometric growth factor, i.e.
+	                           // the factor by which the resolution
+	                           // of each grid is larger (per axis)
+	                           // than that of the preceeding level.
+	"interpolation": "Linear"  // How to interpolate nearby grid
+	                           // lookups. Can be "Nearest", "Linear",
+	                           // or "Smoothstep" (for smooth deri-
+	                           // vatives).
+}
+```
+
 ### Identity
 
 Leaves values untouched. Optionally, multiplies each dimension by a scalar and adds an offset.
@@ -100,34 +173,6 @@ For performance reasons, the encoding uses a quartic kernel rather than a Gaussi
 }
 ```
 
-### Frequency
-
-From NeRF [[Mildenhall et al. 2020]](https://www.matthewtancik.com/nerf). Works better than OneBlob encoding if the dynamic range of the encoded dimension is high. However, suffers from stripe artifacts.
-
-The number of encoded dimensions is twice the specified number of frequencies for each input dimension.
-
-```json5
-{
-	"otype": "Frequency", // Component type.
-	"n_frequencies": 12   // Number of frequencies (sin & cos)
-	                      // per encoded dimension.
-}
-```
-
-### TriangleWave
-
-Similar to the `Frequency` encoding, but replaces the sine function with a cheaper-to-compute triangle wave. Also omits the cosine function. Proposed in [[Müller et al. 2021]](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf). Works better than OneBlob encoding if the dynamic range of the encoded dimension is high. However, suffers from stripe artifacts.
-
-The number of encoded dimensions is the specified number of frequencies for each input dimension.
-
-```json5
-{
-	"otype": "TriangleWave", // Component type.
-	"n_frequencies": 12      // Number of frequencies (triwave)
-	                         // per encoded dimension.
-}
-```
-
 ### Spherical Harmonics
 
 A frequency-space encoding that is more suitable to direction vectors than component-wise `Frequency` or `TriangleWave` encodings.
@@ -145,29 +190,17 @@ The number of encoded dimensions is the degree squared.
 }
 ```
 
-### Composite
+### TriangleWave
 
-Allows composing multiple encodings. The following example replicates the Neural Radiance Caching [[Müller et al. 2021]](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf) encoding by composing the `TriangleWave` encoding for the first 3 (spatial) dimensions, the `OneBlob` encoding for the following 5 non-linear appearance dimensions, and the `Identity` for all remaining dimensions.
+Similar to the `Frequency` encoding, but replaces the sine function with a cheaper-to-compute triangle wave. Also omits the cosine function. Proposed in [[Müller et al. 2021]](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf). Works better than OneBlob encoding if the dynamic range of the encoded dimension is high. However, suffers from stripe artifacts.
+
+The number of encoded dimensions is the specified number of frequencies for each input dimension.
 
 ```json5
 {
-	"otype": "Composite",
-	"nested": [
-		{
-			"n_dims_to_encode": 3, // Spatial dims
-			"otype": "TriangleWave",
-			"n_frequencies": 12
-		},
-		{
-			"n_dims_to_encode": 5, // Non-linear appearance dims.
-			"otype": "OneBlob",
-			"n_bins": 4
-		},
-		{
-			// Number of remaining linear dims is automatically derived
-			"otype": "Identity"
-		}
-	]
+	"otype": "TriangleWave", // Component type.
+	"n_frequencies": 12      // Number of frequencies (triwave)
+	                         // per encoded dimension.
 }
 ```
 
@@ -236,7 +269,7 @@ Relative L2 loss normalized by the network prediction [[Lehtinen et al. 2018]](h
 
 ### Relative L2 Luminance
 
-Same as above, but normalized by the luminance of the network prediction. Only applicable when network prediction is RGB. Used in Neural Radiance Caching [Müller et al. 2021] (to appear).
+Same as above, but normalized by the luminance of the network prediction. Only applicable when network prediction is RGB. Used in Neural Radiance Caching [[Müller et al. 2021]](https://tom94.net/data/publications/mueller21realtime/mueller21realtime.pdf).
 
 ```json5
 {

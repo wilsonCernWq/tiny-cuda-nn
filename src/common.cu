@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -32,17 +32,30 @@
 #include <tiny-cuda-nn/common.h>
 
 #include <algorithm>
+#include <cctype>
+
 
 TCNN_NAMESPACE_BEGIN
 
+static_assert(
+	__CUDACC_VER_MAJOR__ > 10 || (__CUDACC_VER_MAJOR__ == 10 && __CUDACC_VER_MINOR__ >= 2),
+	"tiny-cuda-nn requires at least CUDA 10.2"
+);
+
+uint32_t cuda_compute_capability(int device) {
+	cudaDeviceProp props;
+	CUDA_CHECK_THROW(cudaGetDeviceProperties(&props, device));
+	return props.major * 10 + props.minor;
+}
+
 std::string to_lower(std::string str) {
-    std::transform(std::begin(str), std::end(str), std::begin(str), [](unsigned char c) { return (char)std::tolower(c); });
-    return str;
+	std::transform(std::begin(str), std::end(str), std::begin(str), [](unsigned char c) { return (char)std::tolower(c); });
+	return str;
 }
 
 std::string to_upper(std::string str) {
-    std::transform(std::begin(str), std::end(str), std::begin(str), [](unsigned char c) { return (char)std::toupper(c); });
-    return str;
+	std::transform(std::begin(str), std::end(str), std::begin(str), [](unsigned char c) { return (char)std::toupper(c); });
+	return str;
 }
 
 TCNN_NAMESPACE_END

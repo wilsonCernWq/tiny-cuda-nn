@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -34,7 +34,7 @@
 #include <tiny-cuda-nn/common.h>
 #include <tiny-cuda-nn/encoding.h>
 #include <tiny-cuda-nn/gpu_memory.h>
-#include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/multi_stream.h>
 
 #include <numeric>
@@ -96,8 +96,6 @@ public:
 
 			dims_encoded_so_far += m_nested[i]->num_encoded_dims();
 		}
-
-		std::cout << "CompositeEncoding: " << m_n_dims_to_encode << "->" << num_encoded_dims() << std::endl;
 	}
 
 	void encode(

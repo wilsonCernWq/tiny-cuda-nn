@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -38,7 +38,7 @@
 #include <tiny-cuda-nn/optimizer.h>
 #include <tiny-cuda-nn/loss.h>
 
-#include <tiny-cuda-nn/misc_kernels.h>
+#include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/random.h>
 #include <tiny-cuda-nn/reduce_sum.h>
 #include <tiny-cuda-nn/gpu_memory_json.h>
@@ -72,7 +72,9 @@ public:
 
 	void initialize_params() {
 		size_t n_params = m_model->n_params();
+#ifdef TCNN_VERBOSE_MEMORY_ALLOCS
 		std::cout << "Trainer: Initializing " << n_params << " params and resetting training." << std::endl;
+#endif
 
 		m_params_buffer.resize(sizeof(PARAMS_T) * n_params * 3 + sizeof(float) * n_params * 1);
 		m_params_buffer.memset(0);
@@ -101,7 +103,9 @@ public:
 		);
 
 		// initialize_params is only expected to initialize m_params_full_precision. Cast and copy these over!
-		linear_kernel(cast<PARAMS_T>, 0, nullptr, n_params, m_params_full_precision, m_params);
+		parallel_for_gpu(n_params, [params_fp=m_params_full_precision, params=m_params] __device__ (size_t i) {
+			params[i] = (PARAMS_T)params_fp[i];
+		});
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
 	}
 
@@ -125,7 +129,7 @@ public:
 	}
 
 	const GPUMatrix<COMPUTE_T>& forward(cudaStream_t stream, const GPUMatrix<T>& input) {
-		// Make sure our teporary buffers have the correct size for the given batch size
+		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		if (m_training_prediction_tmp.n() != batch_size) {
 			allocate_training_buffers(m_model->padded_output_width(), batch_size);
@@ -139,8 +143,8 @@ public:
 		return forward(nullptr, input);
 	}
 
-	void evaluate_loss(cudaStream_t stream, const float loss_scale, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
-		// Make sure our teporary buffers have the correct size for the given batch size
+	const GPUMatrix<float>& evaluate_loss(cudaStream_t stream, const float loss_scale, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
+		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = target.n();
 		if (m_training_prediction_tmp.n() != batch_size) {
 			throw std::runtime_error{"Trainer: you must call `forward` before calling `evaluate_loss`"};
@@ -169,6 +173,8 @@ public:
 		if (loss_value) {
 			*loss_value = reduce_sum(m_training_loss_tmp.data(), m_training_loss_tmp.n_elements(), stream);
 		}
+
+		return m_training_loss_tmp;
 	}
 
 	void evaluate_loss(const float loss_scale, const GPUMatrix<float>& target, const GPUMatrix<float>* data_pdf = nullptr, float* loss_value = nullptr) {
@@ -176,7 +182,7 @@ public:
 	}
 
 	void backward(cudaStream_t stream, const GPUMatrix<T>& input) {
-		// Make sure our teporary buffers have the correct size for the given batch size
+		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		if (m_training_prediction_tmp.n() != batch_size) {
 			throw std::runtime_error{"Trainer: you must call `forward` and `evaluate_loss` before calling `backward`"};
@@ -212,7 +218,7 @@ public:
 			throw std::runtime_error(std::string("Target does not have the correct number of dimensions ") + std::to_string(target.m()) + "!=" + std::to_string(m_model->output_width()));
 		}
 
-		// Make sure our teporary buffers have the correct size for the given batch size
+		// Make sure our temporary buffers have the correct size for the given batch size
 		uint32_t batch_size = input.n();
 		bool did_allocate = false;
 		if (m_training_prediction_tmp.n() != batch_size) {
@@ -258,7 +264,11 @@ public:
 			throw std::runtime_error{"Can't set params because CPU buffer has the wrong size."};
 		}
 		CUDA_CHECK_THROW(cudaMemcpy(m_params_full_precision, params_cpu, sizeof(float)*n_params, cudaMemcpyHostToDevice));
-		linear_kernel(cast<PARAMS_T>, 0, nullptr, n_params, m_params_full_precision, m_params_inference);
+
+		parallel_for_gpu(n_params, [params_fp=m_params_full_precision, params_inference=m_params_inference] __device__ (size_t i) {
+			params_inference[i] = (PARAMS_T)params_fp[i];
+		});
+
 		CUDA_CHECK_THROW(cudaMemcpy(m_params, m_params_inference, sizeof(PARAMS_T)*n_params, cudaMemcpyDeviceToDevice));
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
 	}
@@ -269,7 +279,11 @@ public:
 		}
 		CUDA_CHECK_THROW(cudaMemcpy(m_params_inference, params_cpu, sizeof(PARAMS_T)*n_params, cudaMemcpyHostToDevice));
 		CUDA_CHECK_THROW(cudaMemcpy(m_params, m_params_inference, sizeof(PARAMS_T)*n_params, cudaMemcpyDeviceToDevice));
-		linear_kernel(cast_from<PARAMS_T>, 0, nullptr, n_params, m_params_inference, m_params_full_precision);
+
+		parallel_for_gpu(n_params, [params_fp=m_params_full_precision, params_inference=m_params_inference] __device__ (size_t i) {
+			params_fp[i] = (float)params_inference[i];
+		});
+
 		CUDA_CHECK_THROW(cudaDeviceSynchronize());
 	}
 

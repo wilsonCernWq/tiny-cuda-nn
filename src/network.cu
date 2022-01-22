@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -28,11 +28,15 @@
  *  @brief  API interface of a neural network implementation
  */
 
+#include <tiny-cuda-nn/common_device.h>
 #include <tiny-cuda-nn/network.h>
 
 #include <tiny-cuda-nn/networks/cutlass_mlp.h>
 #include <tiny-cuda-nn/networks/cutlass_resnet.h>
+
+#if TCNN_MIN_GPU_ARCH >= 70
 #include <tiny-cuda-nn/networks/fully_fused_mlp.h>
+#endif
 
 
 TCNN_NAMESPACE_BEGIN
@@ -69,52 +73,49 @@ template <typename T>
 Network<T>* create_network(const json& network) {
 	std::string network_type = network.value("otype", "MLP");
 
-	if (equals_case_insensitive(network_type, "MegakernelMLP") || equals_case_insensitive(network_type, "FullyFusedMLP")) {
-		if constexpr (!std::is_same<network_precision_t, __half>::value) {
+	bool wantFullyFusedMlp = equals_case_insensitive(network_type, "MegakernelMLP") || equals_case_insensitive(network_type, "FullyFusedMLP");
+	bool wantCutlassMlp = equals_case_insensitive(network_type, "MLP") || equals_case_insensitive(network_type, "CutlassMLP");
+
+	// If the GPU architecture is insufficient for
+	if (MIN_GPU_ARCH <= 70 || std::is_same<network_precision_t, float>::value) {
+		if (wantFullyFusedMlp && MIN_GPU_ARCH <= 70) {
+			std::cout
+				<< "Warning: FullyFusedMLP is not supported for the selected architecture " << MIN_GPU_ARCH << ". "
+				<< "Falling back to CutlassMLP. For maximum performance, raise the target GPU architecture to 75+."
+				<< std::endl;
+		}
+
+		wantCutlassMlp |= wantFullyFusedMlp;
+		wantFullyFusedMlp = false;
+	}
+
+	if (wantFullyFusedMlp) {
+		if (!std::is_same<network_precision_t, __half>::value) {
 			throw std::runtime_error{"FullyFusedMLP can only be used if the network precision is set to __half."};
 		} else {
+#if TCNN_MIN_GPU_ARCH >= 70
+#  define TCNN_FULLY_FUSED_PARAMS \
+	network["n_input_dims"], \
+	network["n_output_dims"], \
+	network.value("n_hidden_layers", 5u), \
+	network.value("feedback_alignment", false), \
+	string_to_activation(network.value("activation", "ReLU")), \
+	string_to_activation(network.value("output_activation", "None")),
+
 			uint32_t n_neurons = network.value("n_neurons", 128u);
-			if (n_neurons == 256) {
-				return new FullyFusedMLP<T, 256>{
-					network["n_input_dims"],
-					network["n_output_dims"],
-					network.value("n_hidden_layers", 5u),
-					network.value("feedback_alignment", false),
-					string_to_activation(network.value("activation", "ReLU")),
-					string_to_activation(network.value("output_activation", "None")),
-				};
-			} else if (n_neurons == 128) {
-				return new FullyFusedMLP<T, 128>{
-					network["n_input_dims"],
-					network["n_output_dims"],
-					network.value("n_hidden_layers", 5u),
-					network.value("feedback_alignment", false),
-					string_to_activation(network.value("activation", "ReLU")),
-					string_to_activation(network.value("output_activation", "None")),
-				};
-			} else if (n_neurons == 64) {
-				return new FullyFusedMLP<T, 64>{
-					network["n_input_dims"],
-					network["n_output_dims"],
-					network.value("n_hidden_layers", 5u),
-					network.value("feedback_alignment", false),
-					string_to_activation(network.value("activation", "ReLU")),
-					string_to_activation(network.value("output_activation", "None")),
-				};
-			} else if (n_neurons == 32) {
-				return new FullyFusedMLP<T, 32>{
-					network["n_input_dims"],
-					network["n_output_dims"],
-					network.value("n_hidden_layers", 5u),
-					network.value("feedback_alignment", false),
-					string_to_activation(network.value("activation", "ReLU")),
-					string_to_activation(network.value("output_activation", "None")),
-				};
-			} else {
-				throw std::runtime_error{std::string{"FullyFusedMLP only supports 32, 64, 128, and 256 neurons, but got: "} + std::to_string(n_neurons)};
+			switch (n_neurons) {
+				case 16:  return new FullyFusedMLP<T,  16>{TCNN_FULLY_FUSED_PARAMS};
+				case 32:  return new FullyFusedMLP<T,  32>{TCNN_FULLY_FUSED_PARAMS};
+				case 64:  return new FullyFusedMLP<T,  64>{TCNN_FULLY_FUSED_PARAMS};
+				case 128: return new FullyFusedMLP<T, 128>{TCNN_FULLY_FUSED_PARAMS};
+				default: throw std::runtime_error{std::string{"FullyFusedMLP only supports 16, 32, 64, and 128 neurons, but got "} + std::to_string(n_neurons) + ". Use CutlassMLP instead if this is a requirement."};
 			}
+#  undef TCNN_FULLY_FUSED_PARAMS
+#else //TCNN_MIN_GPU_ARCH >= 70
+			throw std::runtime_error{"FullyFusedMLP was not compiled due to insufficient GPU arch of <70."};
+#endif //TCNN_MIN_GPU_ARCH >= 70
 		}
-	} else if (equals_case_insensitive(network_type, "MLP") || equals_case_insensitive(network_type, "CutlassMLP")) {
+	} else if (wantCutlassMlp) {
 		return new CutlassMLP<T>{
 			network["n_input_dims"],
 			network.value("n_neurons", 128u),

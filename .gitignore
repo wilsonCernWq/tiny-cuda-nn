@@ -3,3 +3,4 @@
 # /.vscode
 __pycache__
 # /samples/streaming-volume/
+.DS_Store

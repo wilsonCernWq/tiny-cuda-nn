@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without modification, are permitted
 # provided that the following conditions are met:
@@ -26,18 +26,20 @@
 
 set(SOURCES
 	common.cu
+	common_device.cu
 	cutlass_mlp.cu
 	cutlass_resnet.cu
 	encoding.cu
-	fully_fused_mlp.cu
 	loss.cu
-	misc_kernels.cu
 	network.cu
 	object.cu
 	optimizer.cu
 	reduce_sum.cu
 )
 
+if (MIN_GPU_ARCH GREATER_EQUAL 70)
+	list(APPEND SOURCES fully_fused_mlp.cu)
+endif()
 
 ###############################################################################
 # Linker / library

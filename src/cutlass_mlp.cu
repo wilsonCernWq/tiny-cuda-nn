@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
@@ -36,10 +36,6 @@
 
 TCNN_NAMESPACE_BEGIN
 
-void cutlass_free_workspace(cudaStream_t stream) {
-	free_workspace(stream);
-}
-
 template <typename T>
 CutlassMLP<T>::CutlassMLP(
 	uint32_t input_width,
@@ -54,7 +50,8 @@ m_network_width{network_width},
 m_output_width{output_width},
 m_n_hidden_layers{n_hidden_layers},
 m_activation{activation},
-m_output_activation{output_activation}
+m_output_activation{output_activation},
+m_can_fuse_activation{activation != Activation::Sine}
 {
 	m_padded_output_width = next_multiple(m_output_width, tensorcore_width);
 
@@ -96,8 +93,8 @@ m_output_activation{output_activation}
 	}
 
 	// Buffers to keep data from the forward and backward pass
-	m_forward_tmp.resize(m_n_hidden_layers * 2);
-	m_backward_tmp.resize(m_n_hidden_layers * 2);
+	m_forward_tmp.resize(m_can_fuse_activation ? m_n_hidden_layers : (m_n_hidden_layers * 2));
+	m_backward_tmp.resize(m_can_fuse_activation ? m_n_hidden_layers : (m_n_hidden_layers * 2));
 
 	// 1 stream per matrix.
 	m_training_splitk_streams.resize(m_n_hidden_layers + 1);
@@ -112,66 +109,11 @@ m_output_activation{output_activation}
 template <typename T>
 CutlassMLP<T>::~CutlassMLP() {
 	for (size_t i = 0; i < m_training_splitk_streams.size(); ++i) {
-		free_workspace(m_training_splitk_streams[i]);
+		cutlass_free_workspace(m_training_splitk_streams[i]);
 
 		CUDA_CHECK_PRINT(cudaEventDestroy(m_training_splitk_events[i]));
 		CUDA_CHECK_PRINT(cudaStreamDestroy(m_training_splitk_streams[i]));
 	}
-}
-
-template <typename T, typename arch>
-std::enable_if_t<std::is_same<arch, cutlass::arch::Sm75>::value && std::is_same<__half, T>::value> fused_2_inference(
-	cudaStream_t stream,
-	Activation activation,
-	const GPUMatrix<T>& input,
-	const GPUMatrix<T, RM>& weights1,
-	const GPUMatrix<T, RM>& weights2,
-	GPUMatrix<T>& output
-) {
-	auto transposed_output = output.transposed();
-
-	switch (weights1.n()) {
-		case 64:
-			fc_multiply_b2b<FullLayerB2b64, FullLayerB2b64>(
-				stream,
-				input.transposed(),
-				weights1.transposed(),
-				transposed_output,
-				weights2.transposed(),
-				transposed_output,
-				transposed_output,
-				activation,
-				activation
-			);
-			break;
-		case 128:
-			fc_multiply_b2b<FullLayerB2b128, FullLayerB2b128>(
-				stream,
-				input.transposed(),
-				weights1.transposed(),
-				transposed_output,
-				weights2.transposed(),
-				transposed_output,
-				transposed_output,
-				activation,
-				activation
-			);
-			break;
-		default:
-			throw std::runtime_error{"Invalid layer size (must be 64, 128, or 256)."};
-	}
-}
-
-template <typename T, typename arch>
-std::enable_if_t<!(std::is_same<arch, cutlass::arch::Sm75>::value && std::is_same<__half, T>::value)> fused_2_inference(
-	cudaStream_t,
-	Activation,
-	const GPUMatrix<T>&,
-	const GPUMatrix<T, RM>&,
-	const GPUMatrix<T, RM>&,
-	GPUMatrix<T>&
-) {
-	// Dummy implementation for successful compilation when Sm75 is not available
 }
 
 template <typename T>
@@ -251,11 +193,6 @@ void CutlassMLP<T>::inference_mixed_precision(cudaStream_t stream, const GPUMatr
 	}
 
 	m_inference_graph.capture_and_execute(stream, did_reallocate, [&]() {
-		const bool can_fuse_pairs =
-			std::is_same<SmArch, cutlass::arch::Sm75>::value &&
-			std::is_same<T, __half>::value &&
-			(m_network_width == 128 || m_network_width == 64);
-
 		// Run the actual network
 		{
 			uint32_t tmp_idx = 0;
@@ -265,20 +202,6 @@ void CutlassMLP<T>::inference_mixed_precision(cudaStream_t stream, const GPUMatr
 
 			// Hidden layers
 			for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
-				if (can_fuse_pairs && i < m_n_hidden_matmuls - 1) {
-					fused_2_inference<T, SmArch>(
-						stream,
-						m_activation,
-						m_inference_tmp[(tmp_idx + 1) % 2],
-						weight_matrix_at(use_inference_matrices, i),
-						weight_matrix_at(use_inference_matrices, i + 1),
-						m_inference_tmp[tmp_idx % 2]
-					);
-					++i;
-					++tmp_idx;
-					continue;
-				}
-
 				compute_inference_layer<FullLayer>(stream, m_activation, weight_matrix_at(use_inference_matrices, i), m_inference_tmp[(tmp_idx + 1) % 2], m_inference_tmp[tmp_idx % 2]);
 				++tmp_idx;
 			}
@@ -319,12 +242,28 @@ void CutlassMLP<T>::forward(cudaStream_t stream, const GPUMatrix<T>& input, GPUM
 	// Run the actual network
 	uint32_t tmp_idx = 0;
 
-	bool fused = compute_layer<FullLayer>(stream, false, m_activation, input_weight_matrix(use_inference_matrices), input, m_forward_tmp.at(tmp_idx), m_forward_tmp.at(tmp_idx+1));
+	bool fused = compute_layer<FullLayer>(
+		stream,
+		false,
+		m_activation,
+		input_weight_matrix(use_inference_matrices),
+		input,
+		m_forward_tmp.at(tmp_idx),
+		m_can_fuse_activation ? m_forward_tmp.at(tmp_idx) : m_forward_tmp.at(tmp_idx+1)
+	);
 	tmp_idx += fused ? 1 : 2;
 
 	// layers
 	for (uint32_t i = 0; i < m_n_hidden_matmuls; ++i) {
-		fused = compute_layer<FullLayer>(stream, false, m_activation, weight_matrix_at(use_inference_matrices, i), m_forward_tmp.at(tmp_idx-1), m_forward_tmp.at(tmp_idx), m_forward_tmp.at(tmp_idx+1));
+		fused = compute_layer<FullLayer>(
+			stream,
+			false,
+			m_activation,
+			weight_matrix_at(use_inference_matrices, i),
+			m_forward_tmp.at(tmp_idx-1),
+			m_forward_tmp.at(tmp_idx),
+			m_can_fuse_activation ? m_forward_tmp.at(tmp_idx) : m_forward_tmp.at(tmp_idx+1)
+		);
 		tmp_idx += fused ? 1 : 2;
 	}
 
@@ -352,8 +291,6 @@ void CutlassMLP<T>::backward(
 	if (m_backward_output_tmp.n() != batch_size) {
 		allocate_backward_buffers(batch_size);
 	}
-
-	bool can_fuse_activation = m_activation != Activation::Sine;
 
 	// Compute transfer of output activation in-place... it's treated specially for performance reasons
 	if (m_output_activation != Activation::None) {
@@ -393,7 +330,7 @@ void CutlassMLP<T>::backward(
 			return;
 		}
 
-		uint32_t tmp_idx = (can_fuse_activation ? (m_n_hidden_matmuls+1) : ((m_n_hidden_matmuls+1) * 2)) - 1;
+		uint32_t tmp_idx = (m_can_fuse_activation ? (m_n_hidden_matmuls+1) : ((m_n_hidden_matmuls+1) * 2)) - 1;
 		uint32_t backward_tmp_idx = 0;
 
 		if (compute_param_gradients) {
@@ -407,14 +344,14 @@ void CutlassMLP<T>::backward(
 			cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
 		}
 
-		if (!can_fuse_activation) {
+		if (!m_can_fuse_activation) {
 			fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_matrices).transposed(), tmp_dL_doutput, m_backward_tmp.at(backward_tmp_idx));
 			activation_backward_gpu(stream, m_activation, m_forward_tmp.at(tmp_idx-1), m_backward_tmp.at(backward_tmp_idx));
 		} else {
 			fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_matrices).transposed(), tmp_dL_doutput, m_forward_tmp.at(tmp_idx), m_backward_tmp.at(backward_tmp_idx), m_activation, true);
 		}
 
-		tmp_idx -= can_fuse_activation ? 1 : 2;
+		tmp_idx -= m_can_fuse_activation ? 1 : 2;
 		++backward_tmp_idx;
 
 		// layers
@@ -428,14 +365,14 @@ void CutlassMLP<T>::backward(
 				cudaEventRecord(m_training_splitk_events.at(backward_tmp_idx), m_training_splitk_streams.at(backward_tmp_idx));
 			}
 
-			if (!can_fuse_activation) {
+			if (!m_can_fuse_activation) {
 				fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_matrices, matrix_idx).transposed(), m_backward_tmp.at(backward_tmp_idx-1), m_backward_tmp.at(backward_tmp_idx));
 				activation_backward_gpu(stream, m_activation, m_forward_tmp.at(tmp_idx-1), m_backward_tmp.at(backward_tmp_idx));
 			} else {
 				fc_multiply<FullLayer>(stream, weight_matrix_at(use_inference_matrices, matrix_idx).transposed(), m_backward_tmp.at(backward_tmp_idx-1), m_forward_tmp.at(tmp_idx), m_backward_tmp.at(backward_tmp_idx), m_activation, true);
 			}
 
-			tmp_idx -= can_fuse_activation ? 1 : 2;
+			tmp_idx -= m_can_fuse_activation ? 1 : 2;
 			++backward_tmp_idx;
 		}
 
@@ -502,18 +439,25 @@ void CutlassMLP<T>::allocate_backward_buffers(uint32_t batch_size) {
 }
 
 template <typename T>
-void CutlassMLP<T>::initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
+void CutlassMLP<T>::set_params(T* params, T* inference_params, T* backward_params, T* gradients) {
 	size_t current_pos = 0;
 	for (size_t i = 0; i < m_weight_matrices.size(); ++i) {
 		m_weight_matrices[i].set_data(params + current_pos);
 		m_weight_matrices_inference[i].set_data(inference_params + current_pos);
-		m_weight_matrices_full_precision[i].set_data(params_full_precision + current_pos);
 		m_gradient_matrices[i].set_data(gradients + current_pos);
-
 		current_pos += m_weight_matrices[i].n_elements();
 	}
+}
 
+template <typename T>
+void CutlassMLP<T>::initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale) {
+	set_params(params, inference_params, backward_params, gradients);
+
+	size_t current_pos = 0;
 	for (size_t i = 0; i < m_weight_matrices_full_precision.size(); ++i) {
+		m_weight_matrices_full_precision[i].set_data(params_full_precision + current_pos);
+		current_pos += m_weight_matrices_full_precision[i].n_elements();
+
 		if (m_activation == Activation::Sine) {
 			if (i == 0) {
 				m_weight_matrices_full_precision[i].initialize_siren_uniform_first(rnd, scale);
