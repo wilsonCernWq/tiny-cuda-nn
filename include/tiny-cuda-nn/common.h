@@ -217,6 +217,11 @@ constexpr uint32_t n_blocks_linear(T n_elements) {
 	return (uint32_t)div_round_up(n_elements, (T)n_threads_linear);
 }
 
+template <typename T>
+constexpr uint64_t n_blocks_linear_64bit(T n_elements) {
+	return (uint64_t)div_round_up(n_elements, (T)n_threads_linear);
+}
+
 constexpr uint32_t n_threads_bilinear = 16;
 
 template <typename T>
@@ -231,6 +236,14 @@ inline void linear_kernel(K kernel, uint32_t shmem_size, cudaStream_t stream, T 
 		return;
 	}
 	kernel<<<n_blocks_linear(n_elements), n_threads_linear, shmem_size, stream>>>((uint32_t)n_elements, args...);
+}
+
+template <typename K, typename T, typename ... Types>
+inline void linear_kernel_64bit(K kernel, uint32_t shmem_size, cudaStream_t stream, T n_elements, Types ... args) {
+	if (n_elements <= 0) {
+		return;
+	}
+	kernel<<<n_blocks_linear_64bit(n_elements), n_threads_linear, shmem_size, stream>>>((uint64_t)n_elements, args...);
 }
 
 template <typename K, typename T, typename ... Types>
