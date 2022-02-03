@@ -135,10 +135,10 @@ list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
 # Include files
 ###############################################################################
 
-if (MSVC)
-else()
-	set(CUDA_TOOLKIT_ROOT_DIR /opt/cuda/targets/x86_64-linux)
-endif()
+#if (MSVC)
+#else()
+#	set(CUDA_TOOLKIT_ROOT_DIR /opt/cuda/targets/x86_64-linux)
+#endif()
 find_library(
 	CUDA_CUBLASLT_LIBRARY cublasLt
 	${CUDA_TOOLKIT_ROOT_DIR}/lib64
