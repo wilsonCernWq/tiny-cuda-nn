@@ -45,11 +45,8 @@
 #include <thread>
 #include <vector>
 
-
 using namespace tcnn;
 using precision_t = network_precision_t;
-
-
 
 GPUMemory<float> load_image(const std::string& filename, int& width, int& height) {
 	float* out; // width * height * RGBA
@@ -261,11 +258,12 @@ int main(int argc, char* argv[]) {
 
 			// Training step
 			float loss_value;
-			{
-				trainer->training_step(training_stream, training_batch, training_target, &loss_value);
+			bool get_loss = i % 100 == 0;
+			trainer->training_step(training_stream, training_batch, training_target, get_loss ? &loss_value : nullptr);
+			if (get_loss) {
+				tmp_loss += loss_value;
+				++tmp_loss_counter;
 			}
-			tmp_loss += loss_value;
-			++tmp_loss_counter;
 
 			// Debug outputs
 			{

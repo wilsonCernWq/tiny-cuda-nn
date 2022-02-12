@@ -35,12 +35,14 @@
 
 #include <cuda.h>
 
+#include <algorithm>
 #include <atomic>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
+#include <tuple>
+#include <unordered_map>
 #include <vector>
-
 
 TCNN_NAMESPACE_BEGIN
 
@@ -383,5 +385,265 @@ public:
 		return get_bytes();
 	}
 };
+
+struct Interval {
+	// Inclusive start, exclusive end
+	size_t start, end;
+
+	bool operator<(const Interval& other) const {
+		return end < other.end;
+	}
+
+	bool overlaps(const Interval& other) const {
+		return !intersect(other).empty();
+	}
+
+	Interval intersect(const Interval& other) const {
+		return {std::max(start, other.start), std::min(end, other.end)};
+	}
+
+	bool valid() const {
+		return end >= start;
+	}
+
+	bool empty() const {
+		return end <= start;
+	}
+
+	size_t size() const {
+		return end - start;
+	}
+};
+
+class GPUMemoryArena {
+	// ~16 GB of temporary buffers per stream ought to be enough for now.
+	static const size_t MAX_SIZE = (size_t)1 << 34;
+
+public:
+	GPUMemoryArena() {
+		// Align memory at least by a cache line (128 bytes).
+		m_alignment = (size_t)128;
+		m_max_size = next_multiple(MAX_SIZE, cuda_memory_granularity());
+
+		m_free_intervals = {{0, m_max_size}};
+		CU_CHECK_THROW(cuMemAddressReserve(&m_base_address, m_max_size, 0, 0, 0));
+	}
+
+	GPUMemoryArena(GPUMemoryArena&& other) = default;
+	GPUMemoryArena(const GPUMemoryArena& other) = delete;
+
+	~GPUMemoryArena() {
+		try {
+			total_n_bytes_allocated() -= m_size;
+
+			CUDA_CHECK_THROW(cudaDeviceSynchronize());
+			if (m_base_address) {
+				CU_CHECK_THROW(cuMemUnmap(m_base_address, m_size));
+
+				for (const auto& handle : m_handles) {
+					CU_CHECK_THROW(cuMemRelease(handle));
+				}
+
+				CU_CHECK_THROW(cuMemAddressFree(m_base_address, m_max_size));
+			}
+		} catch (std::runtime_error error) {
+			// Don't need to report on memory-free problems when the driver is shutting down.
+			if (std::string{error.what()}.find("driver shutting down") == std::string::npos) {
+				fprintf(stderr, "Could not free memory: %s\n", error.what());
+			}
+		}
+	}
+
+	uint8_t* data() {
+		return (uint8_t*)m_base_address;
+	}
+
+	// Finds the smallest interval of free memory in the GPUMemoryArena that's
+	// large enough to hold the requested number of bytes. Then allocates
+	// that memory.
+	size_t allocate(size_t n_bytes) {
+		// Permitting zero-sized allocations is error prone
+		if (n_bytes == 0) {
+			n_bytes = m_alignment;
+		}
+
+		// Align allocations with the nearest cache line (at least the granularity of the memory allocations)
+		n_bytes = next_multiple(n_bytes, m_alignment);
+
+		Interval* best_candidate = &m_free_intervals.back();
+		for (auto& f : m_free_intervals) {
+			if (f.size() >= n_bytes && f.size() < best_candidate->size()) {
+				best_candidate = &f;
+			}
+		}
+
+		size_t start = best_candidate->start;
+		m_allocated_intervals[start] = best_candidate->start += n_bytes;
+
+		enlarge(size());
+
+		return start;
+	}
+
+	void free(size_t start) {
+		if (m_allocated_intervals.count(start) == 0) {
+			throw std::runtime_error{"Attempted to free arena memory that was not allocated."};
+		}
+
+		Interval interval = {start, m_allocated_intervals[start]};
+		m_allocated_intervals.erase(start);
+
+		m_free_intervals.insert(
+			std::upper_bound(std::begin(m_free_intervals), std::end(m_free_intervals), interval),
+			interval
+		);
+
+		merge_adjacent_intervals();
+	}
+
+	void enlarge(size_t n_bytes) {
+		if (n_bytes <= m_size) {
+			return;
+		}
+
+		CUDA_CHECK_THROW(cudaDeviceSynchronize());
+
+		size_t n_bytes_to_allocate = n_bytes - m_size;
+		n_bytes_to_allocate = next_multiple(n_bytes_to_allocate, cuda_memory_granularity());
+
+		CUmemAllocationProp prop = {};
+		prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+		prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+		prop.location.id = cuda_device();
+
+		m_handles.emplace_back();
+		CU_CHECK_THROW(cuMemCreate(&m_handles.back(), n_bytes_to_allocate, &prop, 0));
+
+		CUmemAccessDesc access_desc = {};
+		access_desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+		access_desc.location.id = prop.location.id;
+		access_desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+
+		CU_CHECK_THROW(cuMemMap(m_base_address + m_size, n_bytes_to_allocate, 0, m_handles.back(), 0));
+		CU_CHECK_THROW(cuMemSetAccess(m_base_address + m_size, n_bytes_to_allocate, &access_desc, 1));
+		m_size += n_bytes_to_allocate;
+
+		CUDA_CHECK_THROW(cudaDeviceSynchronize());
+
+		total_n_bytes_allocated() += n_bytes_to_allocate;
+	}
+
+	size_t size() const {
+		return m_free_intervals.back().start;
+	}
+
+	class Allocation {
+	public:
+		Allocation() = default;
+		Allocation(cudaStream_t stream, size_t offset, GPUMemoryArena* workspace) : m_stream{stream}, m_offset{offset}, m_workspace{workspace} {}
+
+		~Allocation() {
+			if (m_workspace) {
+				m_workspace->free(m_offset);
+			}
+		}
+
+		Allocation(const Allocation& other) = delete;
+
+		Allocation& operator=(Allocation&& other) {
+			std::swap(m_offset, other.m_offset);
+			std::swap(m_workspace, other.m_workspace);
+			return *this;
+		}
+
+		Allocation(Allocation&& other) {
+			*this = std::move(other);
+		}
+
+		uint8_t* data() {
+			return m_workspace ? m_workspace->data() + m_offset : nullptr;
+		}
+
+		const uint8_t* data() const {
+			return m_workspace ? m_workspace->data() + m_offset : nullptr;
+		}
+
+		cudaStream_t stream() const {
+			return m_stream;
+		}
+
+	private:
+		cudaStream_t m_stream = nullptr;
+		size_t m_offset = 0;
+		GPUMemoryArena* m_workspace = nullptr;
+	};
+
+private:
+	void merge_adjacent_intervals() {
+		size_t j = 0;
+		for (size_t i = 1; i < m_free_intervals.size(); ++i) {
+			Interval& prev = m_free_intervals[j];
+			Interval& cur = m_free_intervals[i];
+
+			if (prev.end == cur.start) {
+				prev.end = cur.end;
+			} else {
+				++j;
+				m_free_intervals[j] = m_free_intervals[i];
+			}
+		}
+		m_free_intervals.resize(j+1);
+	}
+
+	std::vector<Interval> m_free_intervals;
+	std::unordered_map<size_t, size_t> m_allocated_intervals;
+
+	CUdeviceptr m_base_address = {};
+	size_t m_size = 0;
+	std::vector<CUmemGenericAllocationHandle> m_handles;
+
+	size_t m_alignment;
+	size_t m_max_size;
+};
+
+inline std::unordered_map<cudaStream_t, GPUMemoryArena>& gpu_memory_arenas() {
+	static std::unordered_map<cudaStream_t, GPUMemoryArena> s_gpu_memory_arenas;
+	return s_gpu_memory_arenas;
+}
+
+inline GPUMemoryArena::Allocation allocate_workspace(cudaStream_t stream, size_t n_bytes) {
+	if (n_bytes == 0) {
+		// Return a null allocation if no bytes were requested.
+		return {};
+	}
+
+	auto& arena = gpu_memory_arenas()[stream];
+	return GPUMemoryArena::Allocation{stream, arena.allocate(n_bytes), &arena};
+}
+
+static size_t align_to_cacheline(size_t bytes) {
+	return next_multiple(bytes, (size_t)128);
+}
+
+template <typename First, typename FirstSize>
+std::tuple<First*> allocate_workspace_and_distribute(cudaStream_t stream, GPUMemoryArena::Allocation* alloc, size_t offset, FirstSize first_size) {
+	*alloc = allocate_workspace(stream, offset + align_to_cacheline(first_size * sizeof(First)));
+	return std::make_tuple<First*>((First*)(alloc->data() + offset));
+}
+
+template <typename First, typename ...Types, typename FirstSize, typename ...Sizes, std::enable_if_t<sizeof...(Types) != 0 && sizeof...(Types) == sizeof...(Sizes), int> = 0>
+std::tuple<First*, Types*...> allocate_workspace_and_distribute(cudaStream_t stream, GPUMemoryArena::Allocation* alloc, size_t offset, FirstSize first_size, Sizes... sizes) {
+	auto nested = allocate_workspace_and_distribute<Types...>(stream, alloc, offset + align_to_cacheline(first_size * sizeof(First)), sizes...);
+	return std::tuple_cat(std::make_tuple<First*>((First*)(alloc->data() + offset)), nested);
+}
+
+template <typename ...Types, typename ...Sizes, std::enable_if_t<sizeof...(Types) == sizeof...(Sizes), int> = 0>
+std::tuple<Types*...> allocate_workspace_and_distribute(cudaStream_t stream, GPUMemoryArena::Allocation* alloc, Sizes... sizes) {
+	return allocate_workspace_and_distribute<Types...>(stream, alloc, (size_t)0, sizes...);
+}
+
+inline void free_gpu_memory_arena(cudaStream_t stream) {
+	gpu_memory_arenas().erase(stream);
+}
 
 TCNN_NAMESPACE_END

@@ -38,7 +38,6 @@
 #include <tiny-cuda-nn/networks/fully_fused_mlp.h>
 #endif
 
-
 TCNN_NAMESPACE_BEGIN
 
 Activation string_to_activation(std::string activation_name) {
@@ -62,34 +61,33 @@ Activation string_to_activation(std::string activation_name) {
 }
 
 template <typename T>
-void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const T* encoded, float* output) {
-	linear_kernel(extract_dimension_pos_neg_kernel<T>, 0, stream, num_elements, dim, fan_in, fan_out, encoded, output);
+void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const T* encoded, MatrixLayout layout, float* output) {
+	linear_kernel(extract_dimension_pos_neg_kernel<T>, 0, stream, num_elements, dim, fan_in, fan_out, encoded, layout, output);
 }
 
-template void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const network_precision_t* encoded, float* output);
-
+template void extract_dimension_pos_neg(cudaStream_t stream, const uint32_t num_elements, const uint32_t dim, const uint32_t fan_in, const uint32_t fan_out, const network_precision_t* encoded, MatrixLayout layout, float* output);
 
 template <typename T>
 Network<T>* create_network(const json& network) {
 	std::string network_type = network.value("otype", "MLP");
 
-	bool wantFullyFusedMlp = equals_case_insensitive(network_type, "MegakernelMLP") || equals_case_insensitive(network_type, "FullyFusedMLP");
-	bool wantCutlassMlp = equals_case_insensitive(network_type, "MLP") || equals_case_insensitive(network_type, "CutlassMLP");
+	bool want_fully_fused_mlp = equals_case_insensitive(network_type, "MegakernelMLP") || equals_case_insensitive(network_type, "FullyFusedMLP");
+	bool want_cutlass_mlp = equals_case_insensitive(network_type, "MLP") || equals_case_insensitive(network_type, "CutlassMLP");
 
 	// If the GPU architecture is insufficient for
 	if (MIN_GPU_ARCH <= 70 || std::is_same<network_precision_t, float>::value) {
-		if (wantFullyFusedMlp && MIN_GPU_ARCH <= 70) {
+		if (want_fully_fused_mlp && MIN_GPU_ARCH <= 70) {
 			std::cout
 				<< "Warning: FullyFusedMLP is not supported for the selected architecture " << MIN_GPU_ARCH << ". "
 				<< "Falling back to CutlassMLP. For maximum performance, raise the target GPU architecture to 75+."
 				<< std::endl;
 		}
 
-		wantCutlassMlp |= wantFullyFusedMlp;
-		wantFullyFusedMlp = false;
+		want_cutlass_mlp |= want_fully_fused_mlp;
+		want_fully_fused_mlp = false;
 	}
 
-	if (wantFullyFusedMlp) {
+	if (want_fully_fused_mlp) {
 		if (!std::is_same<network_precision_t, __half>::value) {
 			throw std::runtime_error{"FullyFusedMLP can only be used if the network precision is set to __half."};
 		} else {
@@ -115,7 +113,7 @@ Network<T>* create_network(const json& network) {
 			throw std::runtime_error{"FullyFusedMLP was not compiled due to insufficient GPU arch of <70."};
 #endif //TCNN_MIN_GPU_ARCH >= 70
 		}
-	} else if (wantCutlassMlp) {
+	} else if (want_cutlass_mlp) {
 		return new CutlassMLP<T>{
 			network["n_input_dims"],
 			network.value("n_neurons", 128u),

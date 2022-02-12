@@ -28,7 +28,6 @@
  *  @brief  Common utilities that are needed by pretty much every component of this framework.
  */
 
-
 #pragma once
 
 // A macro is used such that external tools won't end up indenting entire files,
@@ -42,8 +41,17 @@
 #include <stdexcept>
 #include <string>
 
-#include <cuda_fp16.h>
+#ifdef __CUDA_NO_HALF_OPERATORS__
+#undef __CUDA_NO_HALF_OPERATORS__
+#endif
+#ifdef __CUDA_NO_HALF_CONVERSIONS__
+#undef __CUDA_NO_HALF_CONVERSIONS__
+#endif
+#ifdef __CUDA_NO_HALF2_OPERATORS__
+#undef __CUDA_NO_HALF2_OPERATORS__
+#endif
 
+#include <cuda_fp16.h>
 
 TCNN_NAMESPACE_BEGIN
 
@@ -84,7 +92,17 @@ enum class Activation {
 // Misc helpers //
 //////////////////
 
-uint32_t cuda_compute_capability(int device = 0);
+int cuda_device();
+
+uint32_t cuda_compute_capability(int device);
+inline uint32_t cuda_compute_capability() {
+	return cuda_compute_capability(cuda_device());
+}
+
+size_t cuda_memory_granularity(int device);
+inline size_t cuda_memory_granularity() {
+	return cuda_memory_granularity(cuda_device());
+}
 
 std::string to_lower(std::string str);
 std::string to_upper(std::string str);
@@ -120,6 +138,10 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 // CUDA ERROR HANDLING (EXCEPTIONS) //
 //////////////////////////////////////
 
+#define STRINGIFY(x) #x
+#define STR(x) STRINGIFY(x)
+#define FILE_LINE __FILE__ ":" STR(__LINE__)
+
 /// Checks the result of a cuXXXXXX call and throws an error on failure
 #define CU_CHECK_THROW(x)                                                                          \
 	do {                                                                                           \
@@ -127,7 +149,18 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 		if (result != CUDA_SUCCESS) {                                                              \
 			const char *msg;                                                                       \
 			cuGetErrorName(result, &msg);                                                          \
-			throw std::runtime_error(std::string("CUDA Error: " #x " failed with error ") + msg);  \
+			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + msg);  \
+		}                                                                                          \
+	} while(0)
+
+/// Checks the result of a cuXXXXXX call and prints an error on failure
+#define CU_CHECK_PRINT(x)                                                                          \
+	do {                                                                                           \
+		CUresult result = x;                                                                       \
+		if (result != CUDA_SUCCESS) {                                                              \
+			const char *msg;                                                                       \
+			cuGetErrorName(result, &msg);                                                          \
+			std::cout << FILE_LINE " " #x " failed with error " << msg << std::endl;  \
 		}                                                                                          \
 	} while(0)
 
@@ -136,7 +169,7 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 	do {                                                                                                                  \
 		cudaError_t result = x;                                                                                           \
 		if (result != cudaSuccess)                                                                                        \
-			throw std::runtime_error(std::string("CUDA Error: " #x " failed with error ") + cudaGetErrorString(result));  \
+			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + cudaGetErrorString(result));  \
 	} while(0)
 
 /// Checks the result of a cudaXXXXXX call and prints an error on failure
@@ -144,7 +177,7 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 	do {                                                                                                      \
 		cudaError_t result = x;                                                                               \
 		if (result != cudaSuccess)                                                                            \
-			std::cout << "CUDA Error: " #x " failed with error " << cudaGetErrorString(result) << std::endl;  \
+			std::cout << FILE_LINE " " #x " failed with error " << cudaGetErrorString(result) << std::endl;  \
 	} while(0)
 
 #if defined(__CUDA_ARCH__)
@@ -367,7 +400,7 @@ inline std::string bytes_to_string(size_t bytes) {
 }
 
 template <typename T, uint32_t N_ELEMS>
-struct alignas(sizeof(T) * N_ELEMS) vector_t {
+struct vector_t {
 	TCNN_HOST_DEVICE T& operator[](uint32_t idx) {
 		return data[idx];
 	}
@@ -389,13 +422,21 @@ using vector_halfp_t = vector_t<__half, N_HALFS>;
 template <typename T>
 struct PitchedPtr {
 	TCNN_HOST_DEVICE PitchedPtr() : ptr{nullptr}, stride_in_bytes{sizeof(T)} {}
-	TCNN_HOST_DEVICE PitchedPtr(T* ptr, size_t stride_in_elements, size_t offset = 0) : ptr{ptr + offset}, stride_in_bytes{(uint32_t)(stride_in_elements * sizeof(T))} {}
+	TCNN_HOST_DEVICE PitchedPtr(T* ptr, size_t stride_in_elements, size_t offset = 0, size_t extra_stride_bytes = 0) : ptr{ptr + offset}, stride_in_bytes{(uint32_t)(stride_in_elements * sizeof(T) + extra_stride_bytes)} {}
 
 	template <typename U>
 	TCNN_HOST_DEVICE explicit PitchedPtr(PitchedPtr<U> other) : ptr{(T*)other.ptr}, stride_in_bytes{other.stride_in_bytes} {}
 
 	TCNN_HOST_DEVICE T* operator()(uint32_t y) const {
 		return (T*)((const char*)ptr + y * stride_in_bytes);
+	}
+
+	TCNN_HOST_DEVICE void operator+=(uint32_t y) {
+		ptr = (T*)((const char*)ptr + y * stride_in_bytes);
+	}
+
+	TCNN_HOST_DEVICE void operator-=(uint32_t y) {
+		ptr = (T*)((const char*)ptr - y * stride_in_bytes);
 	}
 
 	TCNN_HOST_DEVICE explicit operator bool() const {

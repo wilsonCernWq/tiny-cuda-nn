@@ -28,12 +28,12 @@
  *  @brief  Common utilities that are needed by pretty much every component of this framework.
  */
 
-
 #include <tiny-cuda-nn/common.h>
+
+#include <cuda.h>
 
 #include <algorithm>
 #include <cctype>
-
 
 TCNN_NAMESPACE_BEGIN
 
@@ -42,10 +42,26 @@ static_assert(
 	"tiny-cuda-nn requires at least CUDA 10.2"
 );
 
+int cuda_device() {
+	int device;
+	CUDA_CHECK_THROW(cudaGetDevice(&device));
+	return device;
+}
+
 uint32_t cuda_compute_capability(int device) {
 	cudaDeviceProp props;
 	CUDA_CHECK_THROW(cudaGetDeviceProperties(&props, device));
 	return props.major * 10 + props.minor;
+}
+
+size_t cuda_memory_granularity(int device) {
+	size_t granularity;
+	CUmemAllocationProp prop = {};
+	prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+	prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+	prop.location.id = 0;
+	CU_CHECK_THROW(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
+	return granularity;
 }
 
 std::string to_lower(std::string str) {

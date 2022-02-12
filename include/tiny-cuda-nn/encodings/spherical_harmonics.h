@@ -41,9 +41,7 @@
 #include <string>
 #include <vector>
 
-
 TCNN_NAMESPACE_BEGIN
-
 
 template <typename T>
 __global__ void kernel_sh(
@@ -69,7 +67,7 @@ __global__ void kernel_sh(
 	float z = data_in(i)[2] * 2.f - 1.f;
 
 	// Let compiler figure out how to sequence/reorder these calculations w.r.t. branches
-	float xy=x*y, xz=x*z, yz=y*z, x2=x*x, y2=y*y, z2=z*z, xyz=xy*z;
+	float xy=x*y, xz=x*z, yz=y*z, x2=x*x, y2=y*y, z2=z*z;
 	float x4=x2*x2, y4=y2*y2, z4=z2*z2;
 	float x6=x4*x2, y6=y4*y2, z6=z4*z2;
 
@@ -392,6 +390,7 @@ template <typename T>
 __global__ void kernel_sh_backward(
 	const uint32_t num_elements,
 	const uint32_t sh_degree,
+	const uint32_t num_to_pad,
 	PitchedPtr<const T> dL_dy,
 	const float* dy_dx,
 	PitchedPtr<float> dL_dx)
@@ -406,7 +405,7 @@ __global__ void kernel_sh_backward(
 
 	float result = 0;
 	for (int k = 0; k < outputs_per_input; ++k) {
-		result += (float)dL_dy(i)[j * outputs_per_input + k] * dy_dx[i * outputs_per_input * 3 + j * outputs_per_input + k];
+		result += (float)dL_dy(i)[num_to_pad + k] * dy_dx[i * outputs_per_input * 3 + j * outputs_per_input + k];
 	}
 
 	// Multiplication by 2 due to the conversion
@@ -478,6 +477,7 @@ public:
 		linear_kernel(kernel_sh_backward<T>, 0, stream,
 			num_elements * 3,
 			m_sh_degree,
+			m_n_to_pad,
 			dL_dy,
 			dy_dx,
 			dL_dx

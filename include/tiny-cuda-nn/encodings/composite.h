@@ -43,7 +43,6 @@
 #include <string>
 #include <vector>
 
-
 TCNN_NAMESPACE_BEGIN
 
 template <typename T>
@@ -63,7 +62,7 @@ public:
 		}
 
 		if (total_nested_dims_to_encode > n_dims_to_encode) {
-			throw std::runtime_error{"CompositeEncoding: nested encodings must not encode more dims than composite"};
+			throw std::runtime_error{"CompositeEncoding:' nested encodings must not encode more dims than composite"};
 		}
 
 		uint32_t unspecified_dims_to_encode = n_dims_to_encode - total_nested_dims_to_encode;

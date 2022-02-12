@@ -35,7 +35,6 @@
 
 #include <stdint.h>
 
-
 TCNN_NAMESPACE_BEGIN
 
 enum InterpolationType {
@@ -76,6 +75,20 @@ public:
 
 	virtual void set_alignment(uint32_t alignment) = 0;
 	virtual uint32_t min_alignment() const = 0;
+
+	virtual bool supports_output_layout(MatrixLayout layout) const {
+		return layout == AoS;
+	}
+
+	virtual void set_output_layout(MatrixLayout layout) {
+		if (layout == SoA) {
+			throw std::runtime_error{"Encoding does not support SoA outputs."};
+		}
+	}
+
+	virtual MatrixLayout output_layout() const {
+		return AoS;
+	}
 
 	// By default, an encoding has no parameters
 	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override { }

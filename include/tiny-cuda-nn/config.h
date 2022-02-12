@@ -25,7 +25,7 @@
 
 /** @file   config.h
  *  @author Thomas Müller, NVIDIA
- *  @brief  API interface to create everything needed for using the framework from
+ *  @brief  API to create everything needed for using the framework from
  *          a single json config.
  */
 
@@ -39,7 +39,6 @@
 #include <tiny-cuda-nn/network_with_input_encoding.h>
 #include <tiny-cuda-nn/optimizer.h>
 #include <tiny-cuda-nn/trainer.h>
-
 
 TCNN_NAMESPACE_BEGIN
 
