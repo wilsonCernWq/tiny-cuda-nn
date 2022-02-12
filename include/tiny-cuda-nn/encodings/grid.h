@@ -496,7 +496,7 @@ public:
 		m_quantize_threshold = value;
 	}
 
-protected:
+public:
 	// Disables lookups of finer levels than this.
 	// The default value of 1000 effectively disables the feature
 	float m_max_level = 1000.f;
@@ -825,7 +825,7 @@ public:
 		return N_FEATURES_PER_LEVEL;
 	}
 
-private:
+public:
 	uint32_t m_n_features;
 	uint32_t m_n_levels;
 	uint32_t m_n_params;

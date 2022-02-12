@@ -218,7 +218,7 @@ public:
 		return m_encoding.get();
 	}
 
-private:
+public:
 	std::unique_ptr<Network<T>> m_network;
 	std::shared_ptr<Encoding<T>> m_encoding;
 

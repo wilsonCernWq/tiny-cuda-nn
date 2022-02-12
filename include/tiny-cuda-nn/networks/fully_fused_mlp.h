@@ -148,7 +148,7 @@ public:
 		return {m_forward.hidden.at(layer).data(), CM};
 	}
 
-private:
+public:
 	void allocate_forward_buffers(cudaStream_t stream, uint32_t batch_size);
 
 	uint32_t m_n_hidden_layers;
