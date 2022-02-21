@@ -250,13 +250,6 @@ constexpr uint32_t n_blocks_linear(T n_elements) {
 	return (uint32_t)div_round_up(n_elements, (T)n_threads_linear);
 }
 
-constexpr uint32_t n_threads_bilinear = 16;
-
-template <typename T>
-constexpr uint32_t n_blocks_bilinear(T n_elements) {
-	return div_round_up((uint32_t)n_elements, n_threads_bilinear);
-}
-
 #ifdef __NVCC__
 template <typename K, typename T, typename ... Types>
 inline void linear_kernel(K kernel, uint32_t shmem_size, cudaStream_t stream, T n_elements, Types ... args) {
@@ -264,16 +257,6 @@ inline void linear_kernel(K kernel, uint32_t shmem_size, cudaStream_t stream, T 
 		return;
 	}
 	kernel<<<n_blocks_linear(n_elements), n_threads_linear, shmem_size, stream>>>((uint32_t)n_elements, args...);
-}
-
-template <typename K, typename T, typename ... Types>
-inline void bilinear_kernel(K kernel, uint32_t shmem_size, cudaStream_t stream, T width, T height, Types ... args) {
-	if (width <= 0 || height <= 0) {
-		return;
-	}
-	dim3 block_size(n_threads_bilinear, n_threads_bilinear, 1);
-    dim3 grid_size(n_blocks_bilinear(width), n_blocks_bilinear(height), 1);
-	kernel<<<grid_size, block_size, shmem_size, stream>>>((uint32_t)width, (uint32_t)height, args...);
 }
 
 template <typename F>
