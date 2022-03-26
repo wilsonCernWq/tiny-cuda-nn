@@ -73,6 +73,9 @@ public:
 		size_t n_params = m_model->n_params();
 #ifdef TCNN_VERBOSE_MEMORY_ALLOCS
 		std::cout << "Trainer: Initializing " << n_params << " params and resetting training." << std::endl;
+		std::cout << "         among them " << sizeof(PARAMS_T) * n_params << "B used as parameters." << std::endl;
+		std::cout << "         among them " << sizeof(PARAMS_T) * n_params << "B used for gradient and backward propagation." << std::endl;
+		std::cout << "         among them " << sizeof(float) * n_params << "B used as the full precision parameters." << std::endl;
 #endif
 
 		m_params_buffer.resize(sizeof(PARAMS_T) * n_params * 3 + sizeof(float) * n_params * 1);
@@ -109,6 +112,9 @@ public:
 	}
 
 	void allocate_training_buffers(uint32_t padded_output_width, uint32_t batch_size) {
+#ifdef TCNN_VERBOSE_MEMORY_ALLOCS
+		std::cout << "Trainer: Allocating training buffers, batch size = " << batch_size << std::endl;
+#endif
 		m_perturbation.set_size(padded_output_width, batch_size);
 		m_perturbed_training_prediction_tmp.set_size(padded_output_width, batch_size);
 		m_training_prediction_tmp.set_size(padded_output_width, batch_size);
