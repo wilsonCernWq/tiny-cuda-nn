@@ -190,7 +190,7 @@ void CutlassMLP<T>::inference_mixed_precision(cudaStream_t stream, const GPUMatr
 		GPUMatrix<T>{m_network_width, batch_size, stream},
 	};
 
-	m_inference_graph.capture_and_execute(stream, false, [&]() {
+	m_inference_graph.capture_and_execute(stream, true, [&]() {
 		// Run the actual network
 		{
 			uint32_t tmp_idx = 0;
