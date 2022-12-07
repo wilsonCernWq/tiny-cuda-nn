@@ -786,13 +786,13 @@ __global__ void kernel_grid_backward_input_backward_dLdoutput(
 	const float* __restrict__ dy_dx,
 	const T* dL_dy_rm,
 	// ouputs
-	tcnn::MatrixView<T> dL_ddLdy
+	MatrixView<T> dL_ddLdy
 ) {
 	const uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i >= num_elements) return;
 
 	for (uint32_t k=0; k < num_grid_features; ++k) {
-		auto dy_dx_local = ((tcnn::vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + k * num_elements];
+		auto dy_dx_local = ((vector_fullp_t<N_POS_DIMS>*)dy_dx)[i + k * num_elements];
 
 		float result = 0;
 		#pragma unroll

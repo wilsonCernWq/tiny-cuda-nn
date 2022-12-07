@@ -32,7 +32,11 @@
 
 // A macro is used such that external tools won't end up indenting entire files,
 // resulting in wasted horizontal space.
-#define TCNN_NAMESPACE_BEGIN namespace tcnn {
+#ifndef TCNN_NAMESPACE_DEFAULT
+#define TCNN_NAMESPACE_DEFAULT tcnn
+#endif
+
+#define TCNN_NAMESPACE_BEGIN namespace TCNN_NAMESPACE_DEFAULT {
 #define TCNN_NAMESPACE_END }
 
 #include <tiny-cuda-nn/cpp_api.h>

@@ -37,7 +37,8 @@
 #include <tiny-cuda-nn/network_with_input_encoding.h>
 #endif
 
-namespace tcnn { namespace cpp {
+TCNN_NAMESPACE_BEGIN
+namespace cpp {
 
 template <typename T>
 constexpr EPrecision precision() {
@@ -49,17 +50,17 @@ EPrecision preferred_precision() {
 }
 
 uint32_t batch_size_granularity() {
-	return tcnn::batch_size_granularity;
+	return TCNN_NAMESPACE_DEFAULT :: batch_size_granularity;
 }
 
 void free_temporary_memory() {
-	tcnn::free_all_gpu_memory_arenas();
+	TCNN_NAMESPACE_DEFAULT :: free_all_gpu_memory_arenas();
 }
 
 template <typename T>
 class DifferentiableObject : public Module {
 public:
-	DifferentiableObject(tcnn::DifferentiableObject<float, T, T>* model)
+	DifferentiableObject(TCNN_NAMESPACE_DEFAULT :: DifferentiableObject<float, T, T>* model)
 	: Module{precision<T>(), precision<T>()}, m_model{model}
 	{}
 
@@ -146,12 +147,12 @@ public:
 	}
 
 private:
-	std::shared_ptr<tcnn::DifferentiableObject<float, T, T>> m_model;
+	std::shared_ptr<TCNN_NAMESPACE_DEFAULT :: DifferentiableObject<float, T, T>> m_model;
 };
 
 #if !defined(TCNN_NO_NETWORKS)
 Module* create_network_with_input_encoding(uint32_t n_input_dims, uint32_t n_output_dims, const json& encoding, const json& network) {
-	return new DifferentiableObject<network_precision_t>{new tcnn::NetworkWithInputEncoding<network_precision_t>{n_input_dims, n_output_dims, encoding, network}};
+	return new DifferentiableObject<network_precision_t>{new TCNN_NAMESPACE_DEFAULT :: NetworkWithInputEncoding<network_precision_t>{n_input_dims, n_output_dims, encoding, network}};
 }
 
 Module* create_network(uint32_t n_input_dims, uint32_t n_output_dims, const json& network) {
@@ -161,13 +162,14 @@ Module* create_network(uint32_t n_input_dims, uint32_t n_output_dims, const json
 
 Module* create_encoding(uint32_t n_input_dims, const json& encoding, EPrecision requested_precision) {
 	if (requested_precision == EPrecision::Fp32) {
-		return new DifferentiableObject<float>{tcnn::create_encoding<float>(n_input_dims, encoding, 0)};
+		return new DifferentiableObject<float>{TCNN_NAMESPACE_DEFAULT :: create_encoding<float>(n_input_dims, encoding, 0)};
 	}
 #if TCNN_HALF_PRECISION
-	return new DifferentiableObject<__half>{tcnn::create_encoding<__half>(n_input_dims, encoding, 0)};
+	return new DifferentiableObject<__half>{TCNN_NAMESPACE_DEFAULT :: create_encoding<__half>(n_input_dims, encoding, 0)};
 #else
 	throw std::runtime_error{"TCNN was not compiled with half-precision support."};
 #endif
 }
 
-}}
+}
+TCNN_NAMESPACE_END

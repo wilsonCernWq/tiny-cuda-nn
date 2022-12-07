@@ -30,21 +30,29 @@
 
 #pragma once
 
+#ifndef TCNN_NAMESPACE_DEFAULT
+#define TCNN_NAMESPACE_DEFAULT tcnn
+#endif
+
+#define TCNN_NAMESPACE_BEGIN namespace TCNN_NAMESPACE_DEFAULT {
+#define TCNN_NAMESPACE_END }
+
 #include <json/json.hpp>
 
 #include <memory>
 #include <string>
 
-namespace tcnn {
+TCNN_NAMESPACE_BEGIN
 	struct Context {
 		Context() = default;
 		virtual ~Context() {}
 		Context(const Context&) = delete;
 		Context(Context&&) = delete;
 	};
-}
+TCNN_NAMESPACE_END
 
-namespace tcnn { namespace cpp {
+TCNN_NAMESPACE_BEGIN
+namespace cpp {
 
 using json = nlohmann::json;
 
@@ -60,7 +68,7 @@ uint32_t batch_size_granularity();
 void free_temporary_memory();
 
 struct Context {
-	std::unique_ptr<tcnn::Context> ctx;
+	std::unique_ptr< TCNN_NAMESPACE_DEFAULT :: Context> ctx;
 };
 
 class Module {
@@ -99,4 +107,5 @@ Module* create_network_with_input_encoding(uint32_t n_input_dims, uint32_t n_out
 Module* create_network(uint32_t n_input_dims, uint32_t n_output_dims, const json& network);
 Module* create_encoding(uint32_t n_input_dims, const json& encoding, EPrecision requested_precision);
 
-}}
+}
+TCNN_NAMESPACE_END
