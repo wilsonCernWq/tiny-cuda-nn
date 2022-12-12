@@ -95,6 +95,11 @@ source_files = [
 	"../../src/common.cu",
 	"../../src/common_device.cu",
 	"../../src/encoding.cu",
+	
+	"../../src/loss.cu",
+	"../../src/object.cu",
+	"../../src/optimizer.cu",
+	"../../src/reduce_sum.cu",
 ]
 
 if include_networks:
