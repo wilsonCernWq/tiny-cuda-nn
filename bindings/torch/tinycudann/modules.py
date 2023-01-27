@@ -26,7 +26,8 @@ class _module_function(torch.autograd.Function):
 	def forward(ctx, native_tcnn_module, input, params, loss_scale):
 		# If no output gradient is provided, no need to
 		# automatically materialize it as torch.zeros.
-		ctx.set_materialize_grads(False)
+		if hasattr(ctx, 'set_materialize_grads') and callable(getattr(ctx, 'set_materialize_grads')):
+			ctx.set_materialize_grads(False)
 
 		native_ctx, output = native_tcnn_module.fwd(input, params)
 		ctx.save_for_backward(input, params, output)
