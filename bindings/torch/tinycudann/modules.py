@@ -49,6 +49,9 @@ class _module_function(torch.autograd.Function):
 		input, params, output = ctx.saved_tensors
 		input_grad, weight_grad = _module_function_backward.apply(ctx, doutput, input, params, output)
 
+		input_grad  = None if input_grad.shape[0] == 0  else input_grad
+		weight_grad = None if weight_grad.shape[0] == 0 else weight_grad
+
 		return None, input_grad, weight_grad, None
 
 class _module_function_backward(torch.autograd.Function):
@@ -59,8 +62,8 @@ class _module_function_backward(torch.autograd.Function):
 		with torch.no_grad():
 			scaled_grad = doutput * ctx_fwd.loss_scale
 			input_grad, weight_grad = ctx_fwd.native_tcnn_module.bwd(ctx_fwd.native_ctx, input, params, output, scaled_grad)
-			input_grad = None if input_grad is None else (input_grad / ctx_fwd.loss_scale)
-			weight_grad = None if weight_grad is None else (weight_grad / ctx_fwd.loss_scale)
+			input_grad  = torch.empty((0)) if input_grad  is None else (input_grad / ctx_fwd.loss_scale)
+			weight_grad = torch.empty((0)) if weight_grad is None else (weight_grad / ctx_fwd.loss_scale)
 		return input_grad, weight_grad
 
 	@staticmethod
