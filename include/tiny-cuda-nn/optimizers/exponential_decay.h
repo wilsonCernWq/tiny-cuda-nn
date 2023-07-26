@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright notice, this list of
@@ -11,7 +11,7 @@
  *     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
  *       to endorse or promote products derived from this software without specific prior written
  *       permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
  * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
@@ -20,7 +20,6 @@
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
  * STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *//*
  */
 
 /** @file   exponential_decay.h
@@ -54,8 +53,8 @@ public:
 		m_base_learning_rate = m_nested->learning_rate();
 	}
 
-	void allocate(std::shared_ptr<ParametricObject<T>> target) override {
-		m_nested->allocate(target);
+	void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
+		m_nested->allocate(n_weights, layer_sizes);
 	}
 
 	void step(cudaStream_t stream, float loss_scale, float* weights_full_precision, T* weights, const T* gradients) override {
@@ -92,6 +91,15 @@ public:
 		return m_nested->custom_weights();
 	}
 
+	uint32_t n_nested() const override {
+		return 1;
+	}
+
+	const std::shared_ptr<Optimizer<T>>& nested(uint32_t idx) const override {
+		CHECK_THROW(idx == 0);
+		return m_nested;
+	}
+
 	void update_hyperparams(const json& params) override {
 		if (params.contains("decay_base")) {
 			m_decay_base = params["decay_base"];
@@ -114,6 +122,17 @@ public:
 		}
 	}
 
+	json hyperparams() const override {
+		return {
+			{"otype", "ExponentialDecay"},
+			{"nested", m_nested->hyperparams()},
+			{"decay_base", m_decay_base},
+			{"decay_interval", m_decay_interval},
+			{"decay_start", m_decay_start},
+			{"decay_end", m_decay_end},
+		};
+	}
+
 	json serialize() const override {
 		json data;
 		data["nested"] = m_nested->serialize();
@@ -129,7 +148,7 @@ public:
 	}
 
 private:
-	std::unique_ptr<Optimizer<T>> m_nested;
+	std::shared_ptr<Optimizer<T>> m_nested;
 
 	float m_learning_rate_factor = 1.0f;
 	float m_base_learning_rate;

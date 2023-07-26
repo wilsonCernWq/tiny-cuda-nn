@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright notice, this list of
@@ -11,7 +11,7 @@
  *     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
  *       to endorse or promote products derived from this software without specific prior written
  *       permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
  * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
@@ -20,7 +20,6 @@
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
  * STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *//*
  */
 
 /** @file   cutlass_matmul.h
@@ -52,25 +51,12 @@
 
 TCNN_NAMESPACE_BEGIN
 
-#define CUTLASS_CHECK(status)                                                                      \
-{                                                                                                  \
-	cutlass::Status error = status;                                                                \
-	if (error != cutlass::Status::kSuccess) {                                                      \
-		std::cerr << "Got cutlass error: " << cutlassGetStatusString(error) << " at: " << __LINE__ \
-		          << std::endl;                                                                    \
-		exit(EXIT_FAILURE);                                                                        \
-	}                                                                                              \
-}
-
-#define CUDA_CHECK(status)                                                \
-{                                                                         \
-	cudaError_t error = status;                                           \
-	if (error != cudaSuccess) {                                           \
-		std::cerr << "Got bad cuda status: " << cudaGetErrorString(error) \
-		          << " at line: " << __LINE__ << std::endl;               \
-		exit(EXIT_FAILURE);                                               \
-	}                                                                     \
-}
+#define CUTLASS_CHECK_THROW(x)                                                                                        \
+	do {                                                                                                                   \
+		cutlass::Status error = x;                                                                                    \
+		if (error != cutlass::Status::kSuccess)                                                                            \
+			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + cutlassGetStatusString(error)); \
+	} while(0)
 
 using SmArch = std::conditional_t<MIN_GPU_ARCH >= 80,
 	std::conditional_t<std::is_same<network_precision_t, float>::value, cutlass::arch::Sm75, cutlass::arch::Sm80>,
@@ -107,30 +93,19 @@ struct LayerConfig {
 	using k_warp = warp;
 };
 
-using FullLayerK = LayerConfig<cutlass::gemm::GemmShape<64, 64, 32>, cutlass::gemm::GemmShape<32, 32, 32>>;
-using LastLayerK = LayerConfig<cutlass::gemm::GemmShape<64, 64, 32>, cutlass::gemm::GemmShape<32, 32, 32>>;
+using FullLayerK = typename std::conditional<
+	std::is_same<MMAOp<network_precision_t>, cutlass::arch::OpClassSimt>::value,
+	LayerConfig<cutlass::gemm::GemmShape<128, 128, 8>, cutlass::gemm::GemmShape<32, 64, 8>>,
+	LayerConfig<cutlass::gemm::GemmShape<64, 64, 32>, cutlass::gemm::GemmShape<32, 32, 32>>
+>::type;
+using LastLayerK = FullLayerK;
 
 using FullLayer = typename std::conditional<
 	std::is_same<MMAOp<network_precision_t>, cutlass::arch::OpClassSimt>::value,
 	LayerConfig<cutlass::gemm::GemmShape<128, 128, 8>, cutlass::gemm::GemmShape<32, 64, 8>>,
 	LayerConfig<cutlass::gemm::GemmShape<128, 128, 32>, cutlass::gemm::GemmShape<64, 64, 32>>
 >::type;
-
-using FullLayerPreReLU = typename std::conditional<
-	std::is_same<MMAOp<network_precision_t>, cutlass::arch::OpClassSimt>::value,
-	LayerConfig<cutlass::gemm::GemmShape<128, 128, 8, true>, cutlass::gemm::GemmShape<32, 64, 8, true>>,
-	LayerConfig<cutlass::gemm::GemmShape<128, 128, 32, true>, cutlass::gemm::GemmShape<64, 64, 32, true>>
->::type;
-
-using LastLayer = typename std::conditional<
-	std::is_same<MMAOp<network_precision_t>, cutlass::arch::OpClassSimt>::value,
-	LayerConfig<cutlass::gemm::GemmShape<128, 128, 8>, cutlass::gemm::GemmShape<32, 64, 8>>,
-	typename std::conditional<
-		std::is_same<SmArch, cutlass::arch::Sm80>::value || std::is_same<SmArch, cutlass::arch::Sm75>::value,
-		LayerConfig<cutlass::gemm::GemmShape<128, 32, 32>, cutlass::gemm::GemmShape<32, 32, 32>>,
-		LayerConfig<cutlass::gemm::GemmShape<64, 64, 32>, cutlass::gemm::GemmShape<32, 32, 32>>
-	>::type
->::type;
+using LastLayer = FullLayer;
 
 // This code section describes how threadblocks are scheduled on GPU
 using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>;
@@ -180,7 +155,7 @@ public:
 
 	/// Functionally required for serial reduction in the epilogue
 	CUTLASS_HOST_DEVICE
-	void set_k_partition(int k_partition) { }
+	void set_k_partition(int k_partition, int k_partition_count) { }
 
 	CUTLASS_HOST_DEVICE
 	FragmentOutput operator()(FragmentAccumulator const &accumulator) const {
@@ -253,7 +228,7 @@ public:
 
 	/// Functionally required for serial reduction in the epilogue
 	CUTLASS_HOST_DEVICE
-	void set_k_partition(int k_partition) { }
+	void set_k_partition(int k_partition, int k_partition_count) { }
 
 	CUTLASS_HOST_DEVICE
 	FragmentOutput operator()(
@@ -295,12 +270,6 @@ static constexpr int n_vectorized_elements = std::is_same<MMAOp<T>, cutlass::arc
 
 template <typename T>
 using SumOp = cutlass::epilogue::thread::LinearCombination<T, n_vectorized_elements<T>, TypeAccumulator, TypeCompute>;
-
-template <typename T>
-using IntermediateActivationOp = ActivationEpilogue<T, 4, TypeAccumulator, TypeCompute>;
-
-template <typename T>
-using IntermediateActivationTransferOp = ActivationTransferEpilogue<T, 4, TypeAccumulator, TypeCompute>;
 
 template <typename T>
 using ActivationOp = ActivationEpilogue<T, n_vectorized_elements<T>, TypeAccumulator, TypeCompute>;
@@ -356,11 +325,11 @@ void fc_multiply_impl(cudaStream_t stream, const typename Gemm::Arguments& args)
 	// Initialize CUTLASS kernel with arguments and workspace pointer
 	auto workspace = allocate_workspace(stream, workspace_size);
 	cutlass::Status status = gemm_op.initialize(args, workspace.data(), stream);
-	CUTLASS_CHECK(status);
+	CUTLASS_CHECK_THROW(status);
 
 	// Launch initialized CUTLASS kernel
 	status = gemm_op(stream);
-	CUTLASS_CHECK(status);
+	CUTLASS_CHECK_THROW(status);
 }
 
 template <class Gemm>
@@ -374,15 +343,15 @@ void fc_multiply_split_k_impl(cudaStream_t stream, const typename Gemm::Argument
 	// Initialize CUTLASS kernel with arguments and workspace pointer
 	auto workspace = allocate_workspace(stream, workspace_size);
 	cutlass::Status status = gemm_op.initialize(args, workspace.data());
-	CUTLASS_CHECK(status);
+	CUTLASS_CHECK_THROW(status);
 
 	// Launch initialized CUTLASS kernel
 	status = gemm_op(stream);
-	CUTLASS_CHECK(status);
+	CUTLASS_CHECK_THROW(status);
 }
 
 template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeC, MatrixLayout LayoutC, typename TypeD, MatrixLayout LayoutD>
-void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrix<TypeC, LayoutC>& C, GPUMatrix<TypeD, LayoutD>& D, Activation act = Activation::None, bool transfer = false, bool sum_source = false) {
+void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrix<TypeC, LayoutC>& C, const GPUMatrix<TypeD, LayoutD>& D, Activation act = Activation::None, bool transfer = false, bool sum_source = false) {
 	using CutlassLayoutA = typename std::conditional<LayoutA == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 	using CutlassLayoutB = typename std::conditional<LayoutB == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 	using CutlassLayoutC = typename std::conditional<LayoutC == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
@@ -404,26 +373,21 @@ void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const 
 	const int N = B.n();
 
 	if (C.m() != M || C.n() != N) {
-		throw std::runtime_error(std::string("Matrix C has incorrect size ") + std::to_string(C.m()) + "," + std::to_string(C.n()) + "!=" + std::to_string(M) + "," + std::to_string(N));
+		throw std::runtime_error{fmt::format("Matrix C has incorrect size {}x{} != {}x{}", C.m(), C.n(), M, N)};
 	}
 
 	if (D.m() != M || D.n() != N) {
-		throw std::runtime_error(std::string("Matrix D has incorrect size ") + std::to_string(D.m()) + "," + std::to_string(D.n()) + "!=" + std::to_string(M) + "," + std::to_string(N));
+		throw std::runtime_error{fmt::format("Matrix D has incorrect size {}x{} != {}x{}", D.m(), D.n(), M, N)};
 	}
-
-	const int lda = LayoutA == RM ? A.n() : A.m();
-	const int ldb = LayoutB == RM ? B.n() : B.m();
-	const int ldc = LayoutC == RM ? C.n() : C.m();
-	const int ldd = LayoutD == RM ? D.n() : D.m();
 
 	if (transfer) {
 		using Gemm = OurGemm<ActivationTransferOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
 		typename Gemm::Arguments arguments{
 			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B.data(), ldb},
-			{(MatmulTypeAccumulator*)C.data(), ldc},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
+			{(MatmulTypeCompute*)A.data(), (int)A.stride()},
+			{(MatmulTypeCompute*)B.data(), (int)B.stride()},
+			{(MatmulTypeAccumulator*)C.data(), (int)C.stride()},
+			{(MatmulTypeAccumulator*)D.data(), (int)D.stride()},
 			{act},
 			1
 		};
@@ -433,10 +397,10 @@ void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const 
 		using Gemm = OurGemm<ActivationOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
 		typename Gemm::Arguments arguments{
 			{M, N, K},
-			{(MatmulTypeCompute*)A.data(), lda},
-			{(MatmulTypeCompute*)B.data(), ldb},
-			{(MatmulTypeAccumulator*)C.data(), ldc},
-			{(MatmulTypeAccumulator*)D.data(), ldd},
+			{(MatmulTypeCompute*)A.data(), (int)A.stride()},
+			{(MatmulTypeCompute*)B.data(), (int)B.stride()},
+			{(MatmulTypeAccumulator*)C.data(), (int)C.stride()},
+			{(MatmulTypeAccumulator*)D.data(), (int)D.stride()},
 			{act, sum_source},
 			1
 		};
@@ -446,44 +410,34 @@ void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const 
 }
 
 template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeC, typename TypeD>
-void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrixDynamic<TypeC>& C, GPUMatrixDynamic<TypeD>& D, Activation act = Activation::None, bool transfer = false, bool sum_source = false) {
+void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrixDynamic<TypeC>& C, const GPUMatrixDynamic<TypeD>& D, Activation act = Activation::None, bool transfer = false, bool sum_source = false) {
 	if (C.layout() != D.layout()) {
 		throw std::runtime_error{"fc_multiply: Layout of GPUMatrixDynamic C and D must be equal"};
 	}
 
 	if (D.layout() == CM) {
-		auto C_CM = GPUMatrix<TypeC, CM>{C};
-		auto D_CM = GPUMatrix<TypeD, CM>{D};
-		fc_multiply<config>(stream, A, B, C_CM, D_CM, act, transfer, sum_source);
+		fc_multiply<config>(stream, A, B, C.cm(), D.cm(), act, transfer, sum_source);
 	} else {
-		auto C_RM = GPUMatrix<TypeC, RM>{C};
-		auto D_RM = GPUMatrix<TypeD, RM>{D};
-		fc_multiply<config>(stream, A, B, C_RM, D_RM, act, transfer, sum_source);
+		fc_multiply<config>(stream, A, B, C.rm(), D.rm(), act, transfer, sum_source);
 	}
 }
 
 template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, typename TypeC, typename TypeD>
-void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrixDynamic<TypeB>& B, const GPUMatrixDynamic<TypeC>& C, GPUMatrixDynamic<TypeD>& D, Activation act = Activation::None, bool transfer = false, bool sum_source = false) {
+void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrixDynamic<TypeB>& B, const GPUMatrixDynamic<TypeC>& C, const GPUMatrixDynamic<TypeD>& D, Activation act = Activation::None, bool transfer = false, bool sum_source = false) {
 	if (B.layout() == CM) {
-		auto B_CM = GPUMatrix<TypeB, CM>{B};
-		fc_multiply<config>(stream, A, B_CM, C, D, act, transfer, sum_source);
+		fc_multiply<config>(stream, A, B.cm(), C, D, act, transfer, sum_source);
 	} else {
-		auto B_RM = GPUMatrix<TypeB, RM>{B};
-		// Only column-major output is supported by CUTLASS, then B is row-major.
-		// The following constructors will throw if that assumption isn't met.
-		auto C_CM = GPUMatrix<TypeC, CM>{C};
-		auto D_CM = GPUMatrix<TypeD, CM>{D};
-		fc_multiply<config>(stream, A, B_RM, C_CM, D_CM, act, transfer, sum_source);
+		fc_multiply<config>(stream, A, B.rm(), C, D, act, transfer, sum_source);
 	}
 }
 
 template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, typename TypeD>
-void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrixDynamic<TypeB>& B, GPUMatrixDynamic<TypeD>& D, Activation act = Activation::None) {
+void fc_multiply(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrixDynamic<TypeB>& B, const GPUMatrixDynamic<TypeD>& D, Activation act = Activation::None) {
 	fc_multiply<config>(stream, A, B, D, D, act);
 }
 
 template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeC, MatrixLayout LayoutC, typename TypeD, MatrixLayout LayoutD>
-void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrix<TypeC, LayoutC>& C, GPUMatrix<TypeD, LayoutD>& D, int split_k_slices = 1) {
+void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrix<TypeC, LayoutC>& C, const GPUMatrix<TypeD, LayoutD>& D, int split_k_slices = 1, float beta = 0.0f) {
 	using CutlassLayoutA = typename std::conditional<LayoutA == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 	using CutlassLayoutB = typename std::conditional<LayoutB == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
 	using CutlassLayoutC = typename std::conditional<LayoutC == RM, cutlass::layout::RowMajor, cutlass::layout::ColumnMajor>::type;
@@ -505,26 +459,21 @@ void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A
 	const int N = B.n();
 
 	if (C.m() != M || C.n() != N) {
-		throw std::runtime_error(std::string("Matrix C has incorrect size ") + std::to_string(C.m()) + "," + std::to_string(C.n()) + "!=" + std::to_string(M) + "," + std::to_string(N));
+		throw std::runtime_error{fmt::format("Matrix C has incorrect size {}x{} != {}x{}", C.m(), C.n(), M, N)};
 	}
 
 	if (D.m() != M || D.n() != N) {
-		throw std::runtime_error(std::string("Matrix D has incorrect size ") + std::to_string(D.m()) + "," + std::to_string(D.n()) + "!=" + std::to_string(M) + "," + std::to_string(N));
+		throw std::runtime_error{fmt::format("Matrix D has incorrect size {}x{} != {}x{}", D.m(), D.n(), M, N)};
 	}
-
-	const int lda = LayoutA == RM ? A.n() : A.m();
-	const int ldb = LayoutB == RM ? B.n() : B.m();
-	const int ldc = LayoutC == RM ? C.n() : C.m();
-	const int ldd = LayoutD == RM ? D.n() : D.m();
 
 	using Gemm = SplitKGemm<SumOp<MatmulTypeAccumulator>, config, MatmulTypeCompute, CutlassLayoutA, MatmulTypeCompute, CutlassLayoutB, MatmulTypeAccumulator, CutlassLayoutC>;
 	typename Gemm::Arguments arguments{
 		{M, N, K},
-		{(MatmulTypeCompute*)A.data(), lda},
-		{(MatmulTypeCompute*)B.data(), ldb},
-		{(MatmulTypeAccumulator*)C.data(), ldc},
-		{(MatmulTypeAccumulator*)D.data(), ldd},
-		{(TypeCompute)1.0f, (TypeCompute)0.0f},
+		{(MatmulTypeCompute*)A.data(), (int)A.stride()},
+		{(MatmulTypeCompute*)B.data(), (int)B.stride()},
+		{(MatmulTypeAccumulator*)C.data(), (int)C.stride()},
+		{(MatmulTypeAccumulator*)D.data(), (int)D.stride()},
+		{(TypeCompute)1.0f, (TypeCompute)beta},
 		split_k_slices
 	};
 
@@ -532,47 +481,39 @@ void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A
 }
 
 template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, MatrixLayout LayoutB, typename TypeC, typename TypeD>
-void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrixDynamic<TypeC>& C, GPUMatrixDynamic<TypeD>& D, int split_k_slices = 1) {
+void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrix<TypeB, LayoutB>& B, const GPUMatrixDynamic<TypeC>& C, const GPUMatrixDynamic<TypeD>& D, int split_k_slices = 1, float beta = 0.0f) {
 	if (C.layout() != D.layout()) {
 		throw std::runtime_error{"fc_multiply: Layout of GPUMatrixDynamic C and D must be equal"};
 	}
 
 	if (D.layout() == CM) {
-		auto C_CM = GPUMatrix<TypeC, CM>{C};
-		auto D_CM = GPUMatrix<TypeD, CM>{D};
-		fc_multiply_split_k<config>(stream, A, B, C_CM, D_CM, split_k_slices);
+		fc_multiply_split_k<config>(stream, A, B, C.cm(), D.cm(), split_k_slices, beta);
 	} else {
-		auto C_RM = GPUMatrix<TypeC, RM>{C};
-		auto D_RM = GPUMatrix<TypeD, RM>{D};
-		fc_multiply_split_k<config>(stream, A, B, C_RM, D_RM, split_k_slices);
+		fc_multiply_split_k<config>(stream, A, B, C.rm(), D.rm(), split_k_slices, beta);
 	}
 }
 
 template <typename config, typename TypeA, MatrixLayout LayoutA, typename TypeB, typename TypeC, typename TypeD>
-void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrixDynamic<TypeB>& B, const GPUMatrixDynamic<TypeC>& C, GPUMatrixDynamic<TypeD>& D, int split_k_slices = 1) {
+void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A, const GPUMatrixDynamic<TypeB>& B, const GPUMatrixDynamic<TypeC>& C, const GPUMatrixDynamic<TypeD>& D, int split_k_slices = 1, float beta = 0.0f) {
 	if (B.layout() == CM) {
-		auto B_CM = GPUMatrix<TypeB, CM>{B};
-		fc_multiply_split_k<config>(stream, A, B_CM, C, D, split_k_slices);
+		fc_multiply_split_k<config>(stream, A, B.cm(), C, D, split_k_slices, beta);
 	} else {
-		auto B_RM = GPUMatrix<TypeB, RM>{B};
-		fc_multiply_split_k<config>(stream, A, B_RM, C, D, split_k_slices);
+		fc_multiply_split_k<config>(stream, A, B.rm(), C, D, split_k_slices, beta);
 	}
 }
 
 template <typename config, typename TypeA, typename TypeB, typename TypeC, typename TypeD>
-void fc_multiply_split_k(cudaStream_t stream, const GPUMatrixDynamic<TypeA>& A, const GPUMatrixDynamic<TypeB>& B, const GPUMatrixDynamic<TypeC>& C, GPUMatrixDynamic<TypeD>& D, int split_k_slices = 1) {
+void fc_multiply_split_k(cudaStream_t stream, const GPUMatrixDynamic<TypeA>& A, const GPUMatrixDynamic<TypeB>& B, const GPUMatrixDynamic<TypeC>& C, const GPUMatrixDynamic<TypeD>& D, int split_k_slices = 1, float beta = 0.0f) {
 	if (A.layout() == CM) {
-		auto A_CM = GPUMatrix<TypeA, CM>{A};
-		fc_multiply_split_k<config>(stream, A_CM, B, C, D, split_k_slices);
+		fc_multiply_split_k<config>(stream, A.cm(), B, C, D, split_k_slices, beta);
 	} else {
-		auto A_RM = GPUMatrix<TypeA, RM>{A};
-		fc_multiply_split_k<config>(stream, A_RM, B, C, D, split_k_slices);
+		fc_multiply_split_k<config>(stream, A.rm(), B, C, D, split_k_slices, beta);
 	}
 }
 
 template <typename config, typename TypeA, typename TypeB, typename TypeD>
-void fc_multiply_split_k(cudaStream_t stream, const GPUMatrixDynamic<TypeA>& A, const GPUMatrixDynamic<TypeB>& B, GPUMatrixDynamic<TypeD>& D, int split_k_slices) {
-	fc_multiply_split_k<config>(stream, A, B, D, D, split_k_slices);
+void fc_multiply_split_k(cudaStream_t stream, const GPUMatrixDynamic<TypeA>& A, const GPUMatrixDynamic<TypeB>& B, const GPUMatrixDynamic<TypeD>& D, int split_k_slices, float beta) {
+	fc_multiply_split_k<config>(stream, A, B, D, D, split_k_slices, beta);
 }
 
 TCNN_NAMESPACE_END

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright notice, this list of
@@ -11,7 +11,7 @@
  *     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
  *       to endorse or promote products derived from this software without specific prior written
  *       permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
  * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
@@ -20,7 +20,6 @@
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
  * STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *//*
  */
 
 /** @file   gpu_memory_json.h
@@ -52,9 +51,23 @@ inline void to_json(nlohmann::json& j, const GPUMemory<T>& gpu_data) {
 
 template <typename T>
 inline void from_json(const nlohmann::json& j, GPUMemory<T>& gpu_data) {
-	const nlohmann::json::binary_t& cpu_data = j;
-	gpu_data.resize(cpu_data.size()/sizeof(T));
-	json_binary_to_gpu_memory(cpu_data, gpu_data.data(), gpu_data.get_bytes());
+	if (j.is_binary()) {
+		const nlohmann::json::binary_t& cpu_data = j;
+		gpu_data.resize(cpu_data.size()/sizeof(T));
+		json_binary_to_gpu_memory(cpu_data, gpu_data.data(), gpu_data.get_bytes());
+	} else if (j.is_object()) {
+		// https://json.nlohmann.me/features/binary_values/#json
+		json::array_t arr = j["bytes"];
+		nlohmann::json::binary_t cpu_data;
+		cpu_data.resize(arr.size());
+		for(size_t i = 0; i < arr.size(); ++i) {
+			cpu_data[i] = (uint8_t)arr[i];
+		}
+		gpu_data.resize(cpu_data.size()/sizeof(T));
+		json_binary_to_gpu_memory(cpu_data, gpu_data.data(), gpu_data.get_bytes());
+	} else {
+		throw std::runtime_error("Invalid json type: must be either binary or object");
+	}
 }
 
 TCNN_NAMESPACE_END

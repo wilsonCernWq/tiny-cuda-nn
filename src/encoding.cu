@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright notice, this list of
@@ -11,7 +11,7 @@
  *     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
  *       to endorse or promote products derived from this software without specific prior written
  *       permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
  * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
@@ -20,7 +20,6 @@
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
  * STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *//*
  */
 
 /** @file   encoding.cu
@@ -40,7 +39,7 @@
 
 TCNN_NAMESPACE_BEGIN
 
-InterpolationType string_to_interpolation_type(std::string interpolation_type) {
+InterpolationType string_to_interpolation_type(const std::string& interpolation_type) {
 	if (equals_case_insensitive(interpolation_type, "Nearest")) {
 		return InterpolationType::Nearest;
 	} else if (equals_case_insensitive(interpolation_type, "Linear")) {
@@ -49,7 +48,37 @@ InterpolationType string_to_interpolation_type(std::string interpolation_type) {
 		return InterpolationType::Smoothstep;
 	}
 
-	throw std::runtime_error{std::string{"Invalid interpolation type: "} + interpolation_type};
+	throw std::runtime_error{fmt::format("Invalid interpolation type: {}", interpolation_type)};
+}
+
+std::string to_string(InterpolationType interpolation_type) {
+	switch (interpolation_type) {
+		case InterpolationType::Nearest: return "Nearest";
+		case InterpolationType::Linear: return "Linear";
+		case InterpolationType::Smoothstep: return "Smoothstep";
+		default: throw std::runtime_error{"Invalid interpolation type."};
+	}
+}
+
+ReductionType string_to_reduction_type(const std::string& reduction_type) {
+	if (equals_case_insensitive(reduction_type, "Concatenation")) {
+		return ReductionType::Concatenation;
+	} else if (equals_case_insensitive(reduction_type, "Sum")) {
+		return ReductionType::Sum;
+	} else if (equals_case_insensitive(reduction_type, "Product")) {
+		return ReductionType::Product;
+	}
+
+	throw std::runtime_error{fmt::format("Invalid reduction type: {}", reduction_type)};
+}
+
+std::string to_string(ReductionType reduction_type) {
+	switch (reduction_type) {
+		case ReductionType::Concatenation: return "Concatenation";
+		case ReductionType::Sum: return "Sum";
+		case ReductionType::Product: return "Product";
+		default: throw std::runtime_error{"Invalid reduction type."};
+	}
 }
 
 template <typename T>
@@ -116,7 +145,7 @@ Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, ui
 	) {
 		result = create_grid_encoding<T>(n_dims_to_encode, encoding);
 	} else {
-		throw std::runtime_error{std::string{"Invalid encoding type: "} + encoding_type};
+		throw std::runtime_error{fmt::format("Invalid encoding type: {}", encoding_type)};
 	}
 
 	if (alignment > 0) {
@@ -125,6 +154,9 @@ Encoding<T>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, ui
 	return result;
 }
 
-template Encoding<network_precision_t>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment);
+#if TCNN_HALF_PRECISION
+template Encoding<__half>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment);
+#endif
+template Encoding<float>* create_encoding(uint32_t n_dims_to_encode, const json& encoding, uint32_t alignment);
 
 TCNN_NAMESPACE_END

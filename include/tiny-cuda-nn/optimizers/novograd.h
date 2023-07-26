@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright notice, this list of
@@ -11,7 +11,7 @@
  *     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
  *       to endorse or promote products derived from this software without specific prior written
  *       permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
  * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
@@ -20,7 +20,6 @@
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
  * STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *//*
  */
 
 /** @file   novograd.h
@@ -98,21 +97,20 @@ public:
 		update_hyperparams(params);
 	}
 
-	void allocate(std::shared_ptr<ParametricObject<T>> target) override {
-		uint32_t size = (uint32_t)target->n_params();
+	void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
+		m_n_weights = n_weights;
 
-		m_n_weights = size;
 		if (m_n_weights <= m_first_moments.size()) {
 			return;
 		}
 
-		m_first_moments.resize(size);
+		m_first_moments.resize(m_n_weights);
 		m_first_moments.memset(0);
 
 		size_t total_size = 0;
 
 		m_layers.clear();
-		for (const auto& pair : target->layer_sizes()) {
+		for (const auto& pair : layer_sizes) {
 			m_layers.push_back(pair.first * pair.second);
 			total_size += m_layers.back();
 		}
@@ -187,6 +185,10 @@ public:
 		return nullptr;
 	}
 
+	uint32_t n_nested() const override {
+		return 0;
+	}
+
 	void update_hyperparams(const json& params) override {
 		if (params.contains("beta1")) {
 			m_beta1 = params["beta1"];
@@ -211,6 +213,18 @@ public:
 		if (params.contains("absolute_decay")) {
 			m_absolute_weight_decay = params["absolute_decay"];
 		}
+	}
+
+	json hyperparams() const override {
+		return {
+			{"otype", "Novograd"},
+			{"beta1", m_beta1},
+			{"beta2", m_beta2},
+			{"epsilon", m_epsilon},
+			{"learning_rate", m_base_learning_rate},
+			{"relative_decay", m_relative_weight_decay},
+			{"absolute_decay", m_absolute_weight_decay},
+		};
 	}
 
 	json serialize() const override {

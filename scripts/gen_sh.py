@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without modification, are permitted
@@ -19,8 +21,6 @@
 # OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
 # STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#!/usr/bin/env python3
-
 
 from sympy import *
 max_level = 8
@@ -78,6 +78,9 @@ for diffvar in [False,x,y,z] if do_diff else [False]:
 			o=o.subs(y2*y2,y4)
 			o=o.subs(z2*z2,z4)
 			o=simplify(o)
-			out=f'd{diffvar}' if diffvar else 'out';
-			print(f'{out}[{j}] =',ccode(N(o)),';\t\t\t\t//',o)
+			out=f'd{diffvar}' if diffvar else 'out'
+			if diffvar:
+				print(f'{"// " if o == 0 else ""}d{diffvar} += (float)*grad({j}) * ({ccode(N(o))});\t\t\t\t//', o)
+			else:
+				print(f'out[{j}] =', ccode(N(o)), ';\t\t\t\t//', o)
 			j=j+1

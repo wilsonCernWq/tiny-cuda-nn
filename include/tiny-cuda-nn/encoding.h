@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright notice, this list of
@@ -11,7 +11,7 @@
  *     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
  *       to endorse or promote products derived from this software without specific prior written
  *       permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
  * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
@@ -20,7 +20,6 @@
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
  * STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *//*
  */
 
 /** @file   encoding.h
@@ -37,65 +36,55 @@
 
 TCNN_NAMESPACE_BEGIN
 
-enum InterpolationType {
+enum class InterpolationType {
 	Nearest,
 	Linear,
 	Smoothstep,
 };
 
-InterpolationType string_to_interpolation_type(std::string interpolation_type);
+InterpolationType string_to_interpolation_type(const std::string& interpolation_type);
+
+std::string to_string(InterpolationType interpolation_type);
+
+enum class ReductionType {
+	Concatenation,
+	Sum,
+	Product,
+};
+
+ReductionType string_to_reduction_type(const std::string& reduction_type);
+
+std::string to_string(ReductionType reduction_type);
 
 template <typename T>
-class Encoding : public ParametricObject<T> {
+class Encoding : public DifferentiableObject<float, T, T> {
 public:
 	virtual ~Encoding() { }
 
-	virtual void encode(
+	void inference_mixed_precision_impl(
 		cudaStream_t stream,
-		const uint32_t num_elements,
-		PitchedPtr<const float> inputs,
-		PitchedPtr<T> outputs,
-		float* dy_dx = nullptr, // Gradient of output w.r.t. the generating input variable. num_forward_gradient_dims() x num_elements
-		bool is_inference = false
-	) const = 0;
-
-	virtual void backward(
-		cudaStream_t stream,
-		const uint32_t num_elements,
-		PitchedPtr<const T> dL_dy, // Same shape as outputs
-		const float* dy_dx, // encoded output dims x num_elements
-		PitchedPtr<float> dL_dx, // Same shape as inputs
-		PitchedPtr<const float> inputs = {},
-		bool accumulate_param_gradients = false // whether to accumulate parameter gradients on top of the last backward() call
-	) = 0;
-
-	virtual uint32_t num_dims_to_encode() const = 0;
-	virtual uint32_t num_encoded_dims() const = 0;
-	virtual uint32_t num_forward_gradient_dims() const = 0;
-
-	virtual void set_alignment(uint32_t alignment) = 0;
-	virtual uint32_t min_alignment() const = 0;
-
-	virtual bool supports_output_layout(MatrixLayout layout) const {
-		return layout == AoS;
+		const GPUMatrixDynamic<float>& input,
+		GPUMatrixDynamic<T>& output,
+		bool use_inference_params = true
+	) override {
+		this->forward(stream, input, &output, use_inference_params, false);
 	}
 
-	virtual void set_output_layout(MatrixLayout layout) {
-		if (layout == SoA) {
-			throw std::runtime_error{"Encoding does not support SoA outputs."};
-		}
-	}
+	virtual void set_padded_output_width(uint32_t padded_output_width) = 0;
+	virtual uint32_t required_output_alignment() const = 0;
 
-	virtual MatrixLayout output_layout() const {
-		return AoS;
-	}
+	virtual MatrixLayout preferred_output_layout() const = 0;
 
 	// By default, an encoding has no parameters
-	void set_params(T* params, T* inference_params, T* backward_params, T* gradients) override { }
-	void initialize_params(pcg32& rnd, float* params_full_precision, T* params, T* inference_params, T* backward_params, T* gradients, float scale = 1) override { }
+	void set_params_impl(T* params, T* inference_params, T* gradients) override { }
+	void initialize_params(pcg32& rnd, float* params_full_precision, float scale = 1) override { }
 	size_t n_params() const override { return 0; }
 
 	std::vector<std::pair<uint32_t, uint32_t>> layer_sizes() const override { return {}; }
+
+	void set_alignment(uint32_t alignment) {
+		this->set_padded_output_width(next_multiple(this->output_width(), lcm(alignment, this->required_output_alignment())));
+	}
 };
 
 template <typename T>
