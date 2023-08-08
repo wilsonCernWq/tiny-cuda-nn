@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright notice, this list of
@@ -11,7 +11,7 @@
  *     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
  *       to endorse or promote products derived from this software without specific prior written
  *       permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
  * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
@@ -20,7 +20,6 @@
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
  * STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *//*
  */
 
 /** @file   shampoo.h
@@ -48,46 +47,27 @@
 
 TCNN_NAMESPACE_BEGIN
 
+inline std::string cublasGetError(cublasStatus_t error) {
+	switch (error) {
+		case CUBLAS_STATUS_SUCCESS: return "CUBLAS_STATUS_SUCCESS";
+		case CUBLAS_STATUS_NOT_INITIALIZED: return "CUBLAS_STATUS_NOT_INITIALIZED";
+		case CUBLAS_STATUS_ALLOC_FAILED: return "CUBLAS_STATUS_ALLOC_FAILED";
+		case CUBLAS_STATUS_INVALID_VALUE: return "CUBLAS_STATUS_INVALID_VALUE";
+		case CUBLAS_STATUS_ARCH_MISMATCH: return "CUBLAS_STATUS_ARCH_MISMATCH";
+		case CUBLAS_STATUS_MAPPING_ERROR: return "CUBLAS_STATUS_MAPPING_ERROR";
+		case CUBLAS_STATUS_EXECUTION_FAILED: return "CUBLAS_STATUS_EXECUTION_FAILED";
+		case CUBLAS_STATUS_INTERNAL_ERROR: return "CUBLAS_STATUS_INTERNAL_ERROR";
+		case CUBLAS_STATUS_NOT_SUPPORTED: return "CUBLAS_STATUS_NOT_SUPPORTED";
+		default: return "<unknown>";
+	}
+}
+
 #define CUBLAS_CHECK_THROW(x)                                                                                           \
 	do {                                                                                                                \
 		cublasStatus_t result = x;                                                                                      \
 		if (result != CUBLAS_STATUS_SUCCESS)                                                                            \
 			throw std::runtime_error(std::string("CUBLAS Error: " #x " failed with error ") + cublasGetError(result));  \
 	} while(0)
-
-inline std::string cublasGetError(cublasStatus_t error) {
-	switch (error) {
-		case CUBLAS_STATUS_SUCCESS:
-			return "CUBLAS_STATUS_SUCCESS";
-
-		case CUBLAS_STATUS_NOT_INITIALIZED:
-			return "CUBLAS_STATUS_NOT_INITIALIZED";
-
-		case CUBLAS_STATUS_ALLOC_FAILED:
-			return "CUBLAS_STATUS_ALLOC_FAILED";
-
-		case CUBLAS_STATUS_INVALID_VALUE:
-			return "CUBLAS_STATUS_INVALID_VALUE";
-
-		case CUBLAS_STATUS_ARCH_MISMATCH:
-			return "CUBLAS_STATUS_ARCH_MISMATCH";
-
-		case CUBLAS_STATUS_MAPPING_ERROR:
-			return "CUBLAS_STATUS_MAPPING_ERROR";
-
-		case CUBLAS_STATUS_EXECUTION_FAILED:
-			return "CUBLAS_STATUS_EXECUTION_FAILED";
-
-		case CUBLAS_STATUS_INTERNAL_ERROR:
-			return "CUBLAS_STATUS_INTERNAL_ERROR";
-
-		case CUBLAS_STATUS_NOT_SUPPORTED:
-			return "CUBLAS_STATUS_NOT_SUPPORTED";
-	}
-
-	return "<unknown>";
-}
-
 
 template <typename T>
 __global__ void subtract(
@@ -341,9 +321,9 @@ public:
 		return {alpha, beta};
 	}
 
-	void allocate(std::shared_ptr<ParametricObject<T>> target) override {
-		uint32_t size = (uint32_t)target->n_params();
-		m_n_weights = size;
+	void allocate(uint32_t n_weights, const std::vector<std::pair<uint32_t, uint32_t>>& layer_sizes) override {
+		m_n_weights = n_weights;
+
 		if (m_n_weights <= m_first_moments.size()) {
 			return;
 		}
@@ -368,16 +348,16 @@ public:
 		m_one_root = m_coefficients_root.data() + 0;
 		m_zero_root = m_coefficients_root.data() + 1;
 
-		m_first_moments.resize(size);
+		m_first_moments.resize(m_n_weights);
 		m_first_moments.memset(0);
 
-		m_second_moments.resize(size);
+		m_second_moments.resize(m_n_weights);
 		m_second_moments.memset(0);
 
-		m_momentum.resize(size);
+		m_momentum.resize(m_n_weights);
 		m_momentum.memset(0);
 
-		m_shampoo_momentum.resize(size);
+		m_shampoo_momentum.resize(m_n_weights);
 		m_shampoo_momentum.memset(0);
 
 		uint32_t total_M = 0;
@@ -389,8 +369,6 @@ public:
 		std::vector<GPUMatrixBase*> matrices;
 
 		m_matrix_batches.clear();
-
-		auto layer_sizes = target->layer_sizes();
 
 		std::pair<uint32_t, uint32_t> current_size = layer_sizes.front();
 		size_t current_idx = 0;
@@ -916,6 +894,10 @@ public:
 		return nullptr;
 	}
 
+	uint32_t n_nested() const override {
+		return 0;
+	}
+
 	void update_hyperparams(const json& params) override {
 		if (params.contains("beta1")) {
 			m_beta1 = params["beta1"];
@@ -966,6 +948,24 @@ public:
 		}
 
 		// m_graph.reset();
+	}
+
+	json hyperparams() const override {
+		return {
+			{"otype", "Shampoo"},
+			{"beta1", m_beta1},
+			{"beta2", m_beta2},
+			{"beta3", m_beta3},
+			{"beta_shampoo", m_beta_shampoo},
+			{"epsilon", m_epsilon},
+			{"identity", m_identity_strength},
+			{"learning_rate", m_base_learning_rate},
+			{"cg_on_momentum", m_cg_on_momentum},
+			{"frobenius_normalization", m_frobenius_normalization},
+			{"l2_reg", m_l2_reg},
+			{"relative_decay", m_relative_weight_decay},
+			{"absolute_decay", m_absolute_weight_decay},
+		};
 	}
 
 	json serialize() const override {

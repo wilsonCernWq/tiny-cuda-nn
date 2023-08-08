@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright notice, this list of
@@ -11,7 +11,7 @@
  *     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
  *       to endorse or promote products derived from this software without specific prior written
  *       permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
  * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
@@ -20,7 +20,6 @@
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
  * STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *//*
  */
 
 /** @file   common.h
@@ -35,27 +34,24 @@
 #define TCNN_NAMESPACE_BEGIN namespace tcnn {
 #define TCNN_NAMESPACE_END }
 
+
+#include <tiny-cuda-nn/cpp_api.h>
+
+#include <fmt/core.h>
+
 #include <array>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 
-#ifdef __CUDA_NO_HALF_OPERATORS__
-#undef __CUDA_NO_HALF_OPERATORS__
-#endif
-#ifdef __CUDA_NO_HALF_CONVERSIONS__
-#undef __CUDA_NO_HALF_CONVERSIONS__
-#endif
-#ifdef __CUDA_NO_HALF2_OPERATORS__
-#undef __CUDA_NO_HALF2_OPERATORS__
-#endif
-
 #include <cuda_fp16.h>
 
 TCNN_NAMESPACE_BEGIN
 
 static constexpr uint32_t MIN_GPU_ARCH = TCNN_MIN_GPU_ARCH;
+
+#define TCNN_HALF_PRECISION (!(TCNN_MIN_GPU_ARCH == 61 || TCNN_MIN_GPU_ARCH <= 52))
 
 // TCNN has the following behavior depending on GPU arch.
 // Refer to the first row of the table at the following URL for information about
@@ -64,13 +60,13 @@ static constexpr uint32_t MIN_GPU_ARCH = TCNN_MIN_GPU_ARCH;
 //
 //  GPU Arch | FullyFusedMLP supported | CUTLASS SmArch supported |                 Precision
 // ----------|-------------------------|--------------------------|--------------------------
-//    80, 86 |                     yes |                       80 |                    __half
+//     80-90 |                     yes |                       80 |                    __half
 //        75 |                     yes |                       75 |                    __half
 //        70 |                      no |                       70 |                    __half
 // 53-60, 62 |                      no |                       70 |  __half (no tensor cores)
 //  <=52, 61 |                      no |                       70 |   float (no tensor cores)
 
-using network_precision_t = std::conditional_t<MIN_GPU_ARCH == 61 || MIN_GPU_ARCH <= 52, float, __half>;
+using network_precision_t = std::conditional_t<TCNN_HALF_PRECISION, __half, float>;
 
 // Optionally: set the precision to `float` to disable tensor cores and debug potential
 //             problems with mixed-precision training.
@@ -93,6 +89,13 @@ enum class Activation {
 //////////////////
 
 int cuda_device();
+void set_cuda_device(int device);
+int cuda_device_count();
+
+bool cuda_supports_virtual_memory(int device);
+inline bool cuda_supports_virtual_memory() {
+	return cuda_supports_virtual_memory(cuda_device());
+}
 
 uint32_t cuda_compute_capability(int device);
 inline uint32_t cuda_compute_capability() {
@@ -104,11 +107,22 @@ inline size_t cuda_memory_granularity() {
 	return cuda_memory_granularity(cuda_device());
 }
 
+struct MemoryInfo {
+	size_t total;
+	size_t free;
+	size_t used;
+};
+
+MemoryInfo cuda_memory_info();
+
 std::string to_lower(std::string str);
 std::string to_upper(std::string str);
 inline bool equals_case_insensitive(const std::string& str1, const std::string& str2) {
 	return to_lower(str1) == to_lower(str2);
 }
+
+template <typename T>
+std::string type_to_string();
 
 inline bool is_pot(uint32_t num, uint32_t* log2 = nullptr) {
 	if (log2) *log2 = 0;
@@ -134,6 +148,19 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 	return result;
 }
 
+class ScopeGuard {
+public:
+	ScopeGuard() = default;
+	ScopeGuard(const std::function<void()>& callback) : mCallback{callback} {}
+	ScopeGuard(std::function<void()>&& callback) : mCallback{std::move(callback)} {}
+	ScopeGuard(const ScopeGuard& other) = delete;
+	ScopeGuard& operator=(ScopeGuard&& other) { std::swap(mCallback, other.mCallback); return *this; }
+	ScopeGuard(ScopeGuard&& other) { *this = std::move(other); }
+	~ScopeGuard() { if (mCallback) { mCallback(); } }
+private:
+	std::function<void()> mCallback;
+};
+
 //////////////////////////////////////
 // CUDA ERROR HANDLING (EXCEPTIONS) //
 //////////////////////////////////////
@@ -142,6 +169,9 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 #define STR(x) STRINGIFY(x)
 #define FILE_LINE __FILE__ ":" STR(__LINE__)
 
+#define CHECK_THROW(x) \
+	do { if (!(x)) throw std::runtime_error(std::string(FILE_LINE " check failed " #x)); } while(0)
+
 /// Checks the result of a cuXXXXXX call and throws an error on failure
 #define CU_CHECK_THROW(x)                                                                          \
 	do {                                                                                           \
@@ -149,7 +179,7 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 		if (result != CUDA_SUCCESS) {                                                              \
 			const char *msg;                                                                       \
 			cuGetErrorName(result, &msg);                                                          \
-			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + msg);  \
+			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + msg);   \
 		}                                                                                          \
 	} while(0)
 
@@ -160,7 +190,7 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 		if (result != CUDA_SUCCESS) {                                                              \
 			const char *msg;                                                                       \
 			cuGetErrorName(result, &msg);                                                          \
-			std::cout << FILE_LINE " " #x " failed with error " << msg << std::endl;  \
+			std::cout << FILE_LINE " " #x " failed with error " << msg << std::endl;               \
 		}                                                                                          \
 	} while(0)
 
@@ -198,7 +228,7 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 // Kernel helpers //
 ////////////////////
 
-#ifdef __NVCC__
+#if defined(__NVCC__) || (defined(__clang__) && defined(__CUDA__))
 #define TCNN_HOST_DEVICE __host__ __device__
 #define TCNN_DEVICE __device__
 #define TCNN_HOST __host__
@@ -206,6 +236,10 @@ inline uint32_t powi(uint32_t base, uint32_t exponent) {
 #define TCNN_HOST_DEVICE
 #define TCNN_DEVICE
 #define TCNN_HOST
+#endif
+
+#if defined(__CUDA_ARCH__)
+static_assert(__CUDA_ARCH__ >= MIN_GPU_ARCH * 10, "MIN_GPU_ARCH=" STR(TCNN_MIN_GPU_ARCH) "0 must bound __CUDA_ARCH__=" STR(__CUDA_ARCH__) " from below, but doesn't.");
 #endif
 
 template <typename T>
@@ -243,6 +277,8 @@ TCNN_HOST_DEVICE T next_multiple(T val, T divisor) {
 	return div_round_up(val, divisor) * divisor;
 }
 
+constexpr uint32_t batch_size_granularity = 128;
+
 constexpr uint32_t n_threads_linear = 128;
 
 template <typename T>
@@ -250,13 +286,13 @@ constexpr uint32_t n_blocks_linear(T n_elements) {
 	return (uint32_t)div_round_up(n_elements, (T)n_threads_linear);
 }
 
-#ifdef __NVCC__
+#if defined(__NVCC__) || (defined(__clang__) && defined(__CUDA__))
 template <typename K, typename T, typename ... Types>
 inline void linear_kernel(K kernel, uint32_t shmem_size, cudaStream_t stream, T n_elements, Types ... args) {
 	if (n_elements <= 0) {
 		return;
 	}
-	kernel<<<n_blocks_linear(n_elements), n_threads_linear, shmem_size, stream>>>((uint32_t)n_elements, args...);
+	kernel<<<n_blocks_linear(n_elements), n_threads_linear, shmem_size, stream>>>(n_elements, args...);
 }
 
 template <typename F>

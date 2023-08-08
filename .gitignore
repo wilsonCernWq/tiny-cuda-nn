@@ -1,7 +1,6 @@
-build*
-/tmp
-# /.vscode
-__pycache__
-# /samples/streaming-volume/
 .DS_Store
 *.egg-info
+__pycache__
+build*
+dist
+/.vscode

@@ -27,8 +27,8 @@
 set(SOURCES
 	common.cu
 	common_device.cu
+	cpp_api.cu
 	cutlass_mlp.cu
-	cutlass_resnet.cu
 	encoding.cu
 	loss.cu
 	network.cu

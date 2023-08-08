@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright notice, this list of
@@ -11,7 +11,7 @@
  *     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
  *       to endorse or promote products derived from this software without specific prior written
  *       permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
  * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
@@ -20,7 +20,6 @@
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
  * STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *//*
  */
 
 /** @file   cross_entropy.h
@@ -90,18 +89,11 @@ public:
 		const GPUMatrix<float>& target,
 		GPUMatrix<float>& values,
 		GPUMatrix<T>& gradients,
-		const GPUMatrix<float>* data_pdf = nullptr) const override {
-		if (prediction.n() != target.n()) {
-			throw std::runtime_error(std::string("Prediction and target don't have matching batch size ") + std::to_string(prediction.n()) + "!=" + std::to_string(target.n()));
-		}
-
-		if (prediction.m() != stride) {
-			throw std::runtime_error(std::string("Prediction does not have appropriate dimensions ") + std::to_string(prediction.m()) + "!=" + std::to_string(stride));
-		}
-
-		if (target.m() != dims) {
-			throw std::runtime_error(std::string("Target does not have appropriate dimensions ") + std::to_string(target.m()) + "!=" + std::to_string(dims));
-		}
+		const GPUMatrix<float>* data_pdf = nullptr
+	) const override {
+		CHECK_THROW(prediction.n() == target.n());
+		CHECK_THROW(prediction.m() == stride);
+		CHECK_THROW(target.m() == dims);
 
 		linear_kernel(cross_entropy_loss<T>, 0, stream,
 			prediction.n_elements(),
@@ -117,6 +109,12 @@ public:
 	}
 
 	void update_hyperparams(const json& params) override { }
+
+	json hyperparams() const override {
+		return {
+			{"otype", "CrossEntropy"},
+		};
+	}
 };
 
 TCNN_NAMESPACE_END

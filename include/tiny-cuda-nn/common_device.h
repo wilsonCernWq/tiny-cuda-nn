@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
  * provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright notice, this list of
@@ -11,7 +11,7 @@
  *     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
  *       to endorse or promote products derived from this software without specific prior written
  *       permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
  * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
@@ -20,7 +20,6 @@
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
  * STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *//*
  */
 
 /** @file   common_device.h
@@ -159,7 +158,7 @@ __host__ __device__ void warp_activation_backward_in(Activation activation, cons
 		case Activation::Softplus:
 			TCNN_PRAGMA_UNROLL
 			for (int t=0; t < result.num_elements; t++) {
-				float tmp = expf((float)frag.x[t] * K_ACT);
+				float tmp = expf((float)forward_frag_in.x[t] * K_ACT);
 				result.x[t] = frag.x[t] * (T)(tmp / (tmp + 1));
 			}
 			return;
@@ -275,7 +274,7 @@ template <typename T>
 void activation_gpu(cudaStream_t stream, const uint32_t num_elements, const Activation act, const T* in, T* out) {
 	static constexpr uint32_t ACTIVATION_VECTOR_SIZE = 16u / sizeof(T);
 	if (num_elements % ACTIVATION_VECTOR_SIZE != 0) {
-		throw std::runtime_error{std::string{"activation_gpu: number of elements must be a multiple of "} + std::to_string(ACTIVATION_VECTOR_SIZE)};
+		throw std::runtime_error{fmt::format("activation_gpu: number of elements must be a multiple of {}", ACTIVATION_VECTOR_SIZE)};
 	}
 
 	// Activation::None is a noop
@@ -289,7 +288,7 @@ void activation_gpu(cudaStream_t stream, const uint32_t num_elements, const Acti
 template <typename T>
 void activation_gpu(cudaStream_t stream, Activation activation, const GPUMatrixDynamic<T>& input, GPUMatrixDynamic<T>& output) {
 	if (input.n() != output.n() || input.m() != output.m()) {
-		throw std::runtime_error(std::string{"Input and output don't have matching size: "} + std::to_string(input.n()) + "!=" + std::to_string(output.n()));
+		throw std::runtime_error{fmt::format("Input and output don't have matching size: {} != {}", input.n(), output.n())};
 	}
 
 	activation_gpu(stream, input.n_elements(), activation, input.data(), output.data());
@@ -299,7 +298,7 @@ template <typename T>
 void activation_backward_gpu(cudaStream_t stream, const uint32_t num_elements, const Activation act, const T* __restrict__ values, const T* gradients_out, T* gradients_in) {
 	static constexpr uint32_t ACTIVATION_VECTOR_SIZE = 16u / sizeof(T);
 	if (num_elements % ACTIVATION_VECTOR_SIZE != 0) {
-		throw std::runtime_error{std::string{"activation_backward_gpu: number of elements must be a multiple of "} + std::to_string(ACTIVATION_VECTOR_SIZE)};
+		throw std::runtime_error{fmt::format("activation_backward_gpu: number of elements must be a multiple of {}", ACTIVATION_VECTOR_SIZE)};
 	}
 
 	// Activation transfer is a noop for Activation::None
@@ -313,7 +312,7 @@ void activation_backward_gpu(cudaStream_t stream, const uint32_t num_elements, c
 template <typename T>
 void activation_backward_gpu(cudaStream_t stream, Activation activation, const GPUMatrixDynamic<T>& values, GPUMatrixDynamic<T>& gradients) {
 	if (values.n() != gradients.n() || values.m() != gradients.m()) {
-		throw std::runtime_error(std::string("Values and gradients don't have matching size: ") + std::to_string(values.n()) + "!=" + std::to_string(gradients.n()));
+		throw std::runtime_error{fmt::format("Values and gradients don't have matching size: {} != {}", values.n(), gradients.n())};
 	}
 
 	activation_backward_gpu(stream, values.n_elements(), activation, values.data(), gradients.data(), gradients.data());
@@ -323,7 +322,7 @@ template <typename T>
 void activation_backward_output_gpu(cudaStream_t stream, const uint32_t num_elements, const Activation act, const T* __restrict__ output_values, const T* gradients_out, T* gradients_in) {
 	static constexpr uint32_t ACTIVATION_VECTOR_SIZE = 16u / sizeof(T);
 	if (num_elements % ACTIVATION_VECTOR_SIZE != 0) {
-		throw std::runtime_error{std::string{"activation_backward_output_gpu: number of elements must be a multiple of "} + std::to_string(ACTIVATION_VECTOR_SIZE)};
+		throw std::runtime_error{fmt::format("activation_backward_output_gpu: number of elements must be a multiple of {}", ACTIVATION_VECTOR_SIZE)};
 	}
 
 	// Activation transfer is a noop for Activation::None
@@ -384,16 +383,45 @@ __device__ inline float smoothstep_derivative(float val) {
 	return 6*val*(1.0f - val);
 }
 
+__device__ inline float smoothstep_2nd_derivative(float val) {
+	return 6.0f - 12.0f * val;
+}
+
 __device__ inline float identity_fun(float val) {
 	return val;
 }
 
 __device__ inline float identity_derivative(float val) {
-	return 1;
+	return 1.0f;
+}
+
+__device__ inline float identity_2nd_derivative(float val) {
+	return 0.0f;
+}
+
+template <typename F, typename FPRIME, typename FPRIMEPRIME>
+__device__ inline void pos_fract(const float input, float* pos, float* pos_derivative, float* pos_2nd_derivative, uint32_t* pos_grid, float scale, F interpolation_fun, FPRIME interpolation_fun_derivative, FPRIMEPRIME interpolation_fun_2nd_derivative) {
+	// The offset of 0.5 causes different scales to be staggered with respect to each other, thus
+	// preventing spurious alignment of fractional coordinates upon integer scales (or powers thereof).
+	// This is mentioned in Appendix A of the "Instant Neural Graphics Primitives" paper.
+	// The offset can cause wraparound indexing in dense grids, which didn't negatively impact
+	// the approximation quality in any of our tests.
+	*pos = input * scale + 0.5f;
+	int tmp = floorf(*pos);
+	*pos_grid = (uint32_t)tmp;
+	*pos -= (float)tmp;
+	*pos_2nd_derivative = interpolation_fun_2nd_derivative(*pos);
+	*pos_derivative = interpolation_fun_derivative(*pos);
+	*pos = interpolation_fun(*pos);
 }
 
 template <typename F, typename FPRIME>
 __device__ inline void pos_fract(const float input, float* pos, float* pos_derivative, uint32_t* pos_grid, float scale, F interpolation_fun, FPRIME interpolation_fun_derivative) {
+	// The offset of 0.5 causes different scales to be staggered with respect to each other, thus
+	// preventing spurious alignment of fractional coordinates upon integer scales (or powers thereof).
+	// This is mentioned in Appendix A of the "Instant Neural Graphics Primitives" paper.
+	// The offset can cause wraparound indexing in dense grids, which didn't negatively impact
+	// the approximation quality in any of our tests.
 	*pos = input * scale + 0.5f;
 	int tmp = floorf(*pos);
 	*pos_grid = (uint32_t)tmp;
@@ -404,6 +432,11 @@ __device__ inline void pos_fract(const float input, float* pos, float* pos_deriv
 
 template <typename F>
 __device__ inline void pos_fract(const float input, float* pos, uint32_t* pos_grid, float scale, F interpolation_fun) {
+	// The offset of 0.5 causes different scales to be staggered with respect to each other, thus
+	// preventing spurious alignment of fractional coordinates upon integer scales (or powers thereof).
+	// This is mentioned in Appendix A of the "Instant Neural Graphics Primitives" paper.
+	// The offset can cause wraparound indexing in dense grids, which didn't negatively impact
+	// the approximation quality in any of our tests.
 	*pos = input * scale + 0.5f;
 	int tmp = floorf(*pos);
 	*pos_grid = (uint32_t)tmp;
@@ -464,9 +497,9 @@ __device__ inline float quartic_cdf(const float x, const float inv_radius) {
 }
 
 __device__ inline uint32_t permute(uint32_t num, uint32_t size) {
-	const uint32_t A = 10002659; // Large prime number
-	const uint32_t B = 4234151;
-	return (num * A + B) % size;
+	const uint32_t A = 1434869437; // Large prime number
+	const uint32_t B = 2097192037;
+	return ((uint64_t)num * A + B) % size;
 }
 
 template <typename T>
@@ -477,7 +510,7 @@ __global__ void shuffle(const uint32_t n_elements, const uint32_t stride, const 
 	const uint32_t elem_id = i / stride;
 	const uint32_t member_id = i % stride;
 
-	out[i] = in[permute(elem_id ^ seed, n_elements) * stride + member_id];
+	out[i] = in[permute(elem_id + seed, n_elements) * stride + member_id];
 }
 
 template <typename T>
