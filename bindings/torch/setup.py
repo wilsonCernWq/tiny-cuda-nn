@@ -54,7 +54,7 @@ if os.name == "nt":
 		os.environ["PATH"] += ";" + cl_path
 
 nvcc_flags = [
-	"-std=c++14",
+	"-std=c++17",
 	"--extended-lambda",
 	"--expt-relaxed-constexpr",
 	# The following definitions must be undefined
@@ -66,14 +66,14 @@ nvcc_flags = [
 nvcc_flags += [f"-gencode=arch=compute_{compute_capability},code={code}_{compute_capability}" for code in ["compute", "sm"] for compute_capability in compute_capabilities]
 
 if os.name == "posix":
-	cflags = ["-std=c++14"]
+	cflags = ["-std=c++17"]
 	nvcc_flags += [
 		"-Xcompiler=-mf16c",
 		"-Xcompiler=-Wno-float-conversion",
 		"-Xcompiler=-fno-strict-aliasing",
 	]
 elif os.name == "nt":
-	cflags = ["/std:c++14"]
+	cflags = ["/std:c++17"]
 
 definitions = [
 	f"-DTCNN_MIN_GPU_ARCH={min_compute_capability}"
