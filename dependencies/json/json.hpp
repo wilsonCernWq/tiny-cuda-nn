@@ -2325,6 +2325,9 @@ using is_detected_convertible =
     #define JSON_HAS_CPP_11
 #endif
 
+#undef JSON_HAS_CPP_20
+#undef JSON_HAS_CPP_17
+
 // disable documentation warnings on clang
 #if defined(__clang__)
     #pragma clang diagnostic push
