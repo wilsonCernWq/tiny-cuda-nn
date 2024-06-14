@@ -37,7 +37,8 @@
 
 #include <tiny-cuda-nn/cpp_api.h>
 
-#include <fmt/core.h>
+#include <tiny-cuda-nn/fmt_core_v9.h>
+// #include <fmt/core.h>
 
 #include <array>
 #include <iostream>
