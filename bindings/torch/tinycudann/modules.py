@@ -10,7 +10,7 @@ import gc
 import importlib
 import torch
 
-ALL_COMPUTE_CAPABILITIES = [20, 21, 30, 35, 37, 50, 52, 53, 60, 61, 62, 70, 72, 75, 80, 86, 89, 90]
+ALL_COMPUTE_CAPABILITIES = [20, 21, 30, 35, 37, 50, 52, 53, 60, 61, 62, 70, 72, 75, 80, 86, 89, 90, 100, 103, 110, 120, 121]
 
 if not torch.cuda.is_available():
 	raise EnvironmentError("Unknown compute capability. Ensure PyTorch with CUDA support is installed.")
@@ -29,8 +29,7 @@ for cc in reversed(ALL_COMPUTE_CAPABILITIES):
 		break
 	except ImportError:
 		pass
-
-if _C is None:
+else:
 	raise EnvironmentError(f"Could not find compatible tinycudann extension for compute capability {system_compute_capability}.")
 
 def _torch_precision(tcnn_precision):
